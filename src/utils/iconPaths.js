@@ -1,0 +1,59 @@
+/**
+ * Inline icon path data, ported verbatim from the source prototype's icon set
+ * (24x24 viewBox, stroke-based). Kept as raw path strings rather than pulling
+ * in an icon library, matching the original SVG/icon approach.
+ */
+export const ICON_PATHS = {
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/>',
+  user: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  heart: '<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>',
+  bag: '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/>',
+  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  cleft: '<path d="m15 18-6-6 6-6"/>',
+  cright: '<path d="m9 18 6-6-6-6"/>',
+  cdown: '<path d="m6 9 6 6 6-6"/>',
+  aright: '<path d="M5 12h14M12 5l7 7-7 7"/>',
+  aupright: '<path d="M7 17 17 7M7 7h10v10"/>',
+  truck: '<path d="M14 18V6a2 2 0 0 0-2-2H3v12h11z"/><path d="M14 9h4l4 4v5h-8"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
+  sparkles: '<path d="m12 3 1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3z"/><path d="M19 15l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8L19 15z"/>',
+  eggoff: '<path d="M4.5 13.5a7.5 7.5 0 0 0 12.4 5.7"/><path d="M19.5 13.5C19.5 8.8 16.1 2 12 2c-1.5 0-2.9.9-4 2.3"/><path d="m2 2 20 20"/>',
+  cake: '<path d="M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8"/><path d="M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2.5 2 4 2 2-1 2-1"/><path d="M2 21h20"/><path d="M7 8v2M12 6v4M17 8v2"/><circle cx="7" cy="6" r="1"/><circle cx="12" cy="4" r="1"/><circle cx="17" cy="6" r="1"/>',
+  slice: '<path d="M3 12 20 4l1 5-6 12H8L3 12z"/><path d="M3 12h18"/>',
+  cookie: '<circle cx="12" cy="12" r="9"/><circle cx="9" cy="9" r="1"/><circle cx="15" cy="10" r="1"/><circle cx="11" cy="15" r="1"/><circle cx="16" cy="15" r="1"/>',
+  bowl: '<path d="M3 11h18a9 9 0 0 1-18 0z"/><circle cx="9" cy="6" r="3"/><circle cx="15" cy="6" r="3"/>',
+  party: '<path d="M3 21 8 8l8 8-13 5z"/><path d="M15 5v2M19 3l-1 1M21 8h-2M17 11l1 1"/>',
+  gem: '<path d="M6 3h12l4 6-10 12L2 9l4-6z"/><path d="M2 9h20M9 3 7 9l5 12 5-12-2-6"/>',
+  wheat: '<path d="M12 22V8"/><path d="M12 8c0-3 2-5 4-5 0 3-2 5-4 5zM12 8c0-3-2-5-4-5 0 3 2 5 4 5zM12 14c0-3 2-5 4-5 0 3-2 5-4 5zM12 14c0-3-2-5-4-5 0 3 2 5 4 5z"/>',
+  leaf: '<path d="M11 20A7 7 0 0 1 4 13c0-6 6-9 16-9 0 10-4 16-9 16z"/><path d="M4 21c3-6 7-9 12-11"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  star: '<path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>',
+  camera: '<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>',
+  gift: '<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M5 12v9h14v-9M12 8v13"/><path d="M12 8S10.5 3 8 3a2.5 2.5 0 0 0 0 5M12 8s1.5-5 4-5a2.5 2.5 0 0 1 0 5"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/>',
+  mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m3 6 9 7 9-7"/>',
+  insta: '<rect x="2" y="2" width="20" height="20" rx="6"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1"/>',
+  fb: '<path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/>',
+  tw: '<path d="M4 3h4l12 18h-4L4 3z"/><path d="m4 21 7-8M20 3l-7 8"/>',
+  minus: '<path d="M5 12h14"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  alert: '<path d="M10.3 3.9 1.9 18a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+  quote: '<path d="M9 11H5a1 1 0 0 1-1-1V7a3 3 0 0 1 3-3M20 11h-4a1 1 0 0 1-1-1V7a3 3 0 0 1 3-3"/><path d="M4 10c0 6 2 9 5 10M15 10c0 6 2 9 5 10"/>',
+  cal: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+  percent: '<path d="m19 5-14 14"/><circle cx="7.5" cy="7.5" r="2.5"/><circle cx="16.5" cy="16.5" r="2.5"/>',
+  home: '<path d="M3 11 12 3l9 8v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 21v-7h6v7"/>',
+  news: '<path d="M4 4h13a1 1 0 0 1 1 1v14a2 2 0 0 0 2 2H5a2 2 0 0 1-2-2V5a1 1 0 0 1 1-1z"/><path d="M18 8h2a1 1 0 0 1 1 1v10a2 2 0 0 1-2 2"/><path d="M7 8h7M7 12h7M7 16h4"/>',
+  pkg: '<path d="M21 8v8l-9 5-9-5V8l9-5 9 5z"/><path d="m3 8 9 5 9-5M12 13v8"/>',
+  msg: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  edit: '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>',
+  eye: '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>',
+  arrowup: '<path d="M12 19V5M5 12l7-7 7 7"/>',
+  arrowdown: '<path d="M12 5v14M19 12l-7 7-7-7"/>',
+};
+
+export function iconSvg(name) {
+  return ICON_PATHS[name] || '';
+}
