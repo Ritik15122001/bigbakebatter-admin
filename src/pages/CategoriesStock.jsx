@@ -83,16 +83,15 @@ export default function CategoriesStock() {
         <div className="a-table-wrap">
           <table className="tbl tbl-mini">
             <thead>
-              <tr><th>Cake</th><th>Qty</th><th>Status</th><th /></tr>
+              <tr><th>Cake</th><th>Status</th><th /></tr>
             </thead>
             <tbody>
               {stock.map((s) => (
                 <tr key={s._id}>
                   <td>
                     <span className="cell-main">{s.name}</span>
-                    <span className="cell-sub">{s.cat}</span>
+                    <span className="cell-sub">{s.cat} · Qty {s.qty}</span>
                   </td>
-                  <td>{s.qty}</td>
                   <td>
                     <span className={`badge ${s.stock === 'Out of stock' ? 'err' : s.stock === 'Low stock' ? 'warn' : 'success'}`}>{s.stock}</span>
                   </td>

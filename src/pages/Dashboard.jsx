@@ -4,6 +4,8 @@ import Icon from '../components/common/Icon';
 import { dashboardService } from '../services/dashboardService';
 import { money } from '../utils/format';
 
+const SHORT_STATUS = { 'Out for delivery': 'Delivery' };
+
 const KPI_ICON_TONE = {
   revenue: { bg: 'var(--c-accent-soft)', color: 'var(--c-accent)' },
   orders: { bg: '#eef2ff', color: '#4338ca' },
@@ -90,9 +92,9 @@ export default function Dashboard() {
             <button className="btn btn-outline btn-sm" onClick={() => navigate('/orders')}>View all</button>
           </div>
           <div className="a-table-wrap">
-            <table className="tbl">
+            <table className="tbl tbl-mini">
               <thead>
-                <tr><th>Order</th><th>Customer</th><th>Amount</th><th>Status</th></tr>
+                <tr><th>Order</th><th>Customer</th><th>Status</th></tr>
               </thead>
               <tbody>
                 {recentOrders.map((o) => (
@@ -101,10 +103,12 @@ export default function Dashboard() {
                       <span className="cell-main">{o.code}</span>
                       <span className="cell-sub">{new Date(o.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</span>
                     </td>
-                    <td>{o.customer}</td>
-                    <td>{money(o.amount)}</td>
                     <td>
-                      <span className={`badge ${o.status === 'Delivered' ? 'success' : o.status === 'Cancelled' ? 'err' : 'warn'}`}>{o.status}</span>
+                      <span className="cell-main">{o.customer}</span>
+                      <span className="cell-sub">{money(o.amount)}</span>
+                    </td>
+                    <td>
+                      <span className={`badge ${o.status === 'Delivered' ? 'success' : o.status === 'Cancelled' ? 'err' : 'warn'}`} title={o.status}>{SHORT_STATUS[o.status] || o.status}</span>
                     </td>
                   </tr>
                 ))}
