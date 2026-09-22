@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import Icon from '../components/common/Icon';
 import Modal from '../components/common/Modal';
+import EmptyState from '../components/common/EmptyState';
 import { orderService } from '../services/orderService';
 import { useUiStore } from '../store/uiStore';
-import { money } from '../utils/format';
+import { money, fmtDateTime } from '../utils/format';
 
 const STATUS_TABS = ['All', 'New', 'Baking', 'Out for delivery', 'Delivered', 'Cancelled'];
 const STATUS_OPTS = ['New', 'Baking', 'Out for delivery', 'Delivered', 'Cancelled'];
@@ -48,12 +49,13 @@ export default function Orders() {
   return (
     <div className="a-panel">
       <div className="a-panel-head">
-        <div className="row gap-2" style={{ flexWrap: 'wrap' }}>
+        <div className="row gap-2 center" style={{ flexWrap: 'wrap' }}>
           {STATUS_TABS.map((t) => (
             <button key={t} className="mini-select" style={tab === t ? { background: 'var(--c-ink)', color: '#fff' } : undefined} onClick={() => setTab(t)}>
               {t}
             </button>
           ))}
+          {!loading && <span className="a-count">{filtered.length} order{filtered.length === 1 ? '' : 's'}</span>}
         </div>
         <div className="field" style={{ minWidth: 220 }}>
           <input className="input" placeholder="Search order, customer..." value={q} onChange={(e) => setQ(e.target.value)} />
@@ -63,12 +65,12 @@ export default function Orders() {
       {loading ? (
         <div className="a-empty"><p className="muted">Loading orders…</p></div>
       ) : filtered.length === 0 ? (
-        <div className="a-empty"><p className="muted">No orders match this filter.</p></div>
+        <EmptyState icon="bag" title="No orders match this filter" message="Try a different status tab or clear your search." />
       ) : (
         <div className="a-table-wrap">
           <table className="tbl">
             <thead>
-              <tr><th>Order</th><th>Customer</th><th>Items</th><th>Amount</th><th>Status</th><th /></tr>
+              <tr><th>Order</th><th>Customer</th><th>Items</th><th className="num">Amount</th><th className="tight">Status</th><th className="act" /></tr>
             </thead>
             <tbody>
               {filtered.map((o) => (
@@ -82,16 +84,16 @@ export default function Orders() {
                     <span className="cell-sub">{o.phone}</span>
                   </td>
                   <td onClick={() => setActive(o)}>{o.items.map((i) => i.name).join(', ')}</td>
-                  <td onClick={() => setActive(o)}>{money(o.amount)}</td>
-                  <td onClick={(e) => e.stopPropagation()}>
+                  <td className="num cell-main" onClick={() => setActive(o)}>{money(o.amount)}</td>
+                  <td className="tight" onClick={(e) => e.stopPropagation()}>
                     <select className="mini-select" value={o.status} onChange={(e) => handleStatusChange(o._id, e.target.value)}>
                       {STATUS_OPTS.map((s) => (
                         <option key={s} value={s}>{s}</option>
                       ))}
                     </select>
                   </td>
-                  <td className="rowact" onClick={(e) => e.stopPropagation()}>
-                    <button className="iconbtn" aria-label="View" onClick={() => setActive(o)}>
+                  <td className="act rowact" onClick={(e) => e.stopPropagation()}>
+                    <button className="iconbtn" title="View order details" aria-label="View" onClick={() => setActive(o)}>
                       <Icon name="aright" className="icon icon-sm" />
                     </button>
                   </td>
@@ -117,6 +119,7 @@ export default function Orders() {
               </div>
             ))}
             <div className="sum-row total"><span>Total</span><span>{money(active.amount)}</span></div>
+            <div className="sum-row"><span>Placed on</span><span>{fmtDateTime(active.createdAt)}</span></div>
             <div className="sum-row"><span>Delivery</span><span>{active.deliver} · {active.slot}</span></div>
             <div className="sum-row"><span>Address</span><span style={{ textAlign: 'right', maxWidth: '60%' }}>{active.addr}</span></div>
             <div className="sum-row"><span>Payment</span><span>{active.pay}</span></div>
