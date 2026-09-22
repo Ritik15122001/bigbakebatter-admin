@@ -7,7 +7,10 @@ import { uploadService } from '../services/uploadService';
 import { useUiStore } from '../store/uiStore';
 import { money } from '../utils/format';
 
-const EMPTY = { name: '', cat: '', base: '', stock: 'In stock', tag: '', corporate: false, img: [] };
+const EMPTY = {
+  name: '', cat: '', flavour: '', base: '', stock: 'In stock', tag: '',
+  eggless: true, veg: true, corporate: false, desc: '', img: [],
+};
 
 export default function Cakes() {
   const pushToast = useUiStore((s) => s.pushToast);
@@ -44,7 +47,10 @@ export default function Cakes() {
   };
   const openEdit = (p) => {
     setEditing(p._id);
-    setForm({ name: p.name, cat: p.cat, base: p.base, stock: p.stock, tag: p.tag, corporate: !!p.corporate, img: p.img || [] });
+    setForm({
+      name: p.name, cat: p.cat, flavour: p.flavour || '', base: p.base, stock: p.stock, tag: p.tag,
+      eggless: p.eggless !== false, veg: p.veg !== false, corporate: !!p.corporate, desc: p.desc || '', img: p.img || [],
+    });
   };
 
   const handleFile = async (e) => {
@@ -53,12 +59,17 @@ export default function Cakes() {
     setUploading(true);
     try {
       const url = await uploadService.upload(file);
-      setForm((f) => ({ ...f, img: [url, ...f.img] }));
+      setForm((f) => ({ ...f, img: [...f.img, url] }));
     } catch (err) {
       pushToast({ title: 'Upload failed', subtitle: err.message, kind: 'err' });
     } finally {
       setUploading(false);
+      e.target.value = '';
     }
+  };
+
+  const removeImage = (idx) => {
+    setForm((f) => ({ ...f, img: f.img.filter((_, i) => i !== idx) }));
   };
 
   const save = async (e) => {
@@ -156,16 +167,29 @@ export default function Cakes() {
       >
         <form className="stack gap-4" onSubmit={save}>
           <div className="field">
-            <label>Photo</label>
+            <label>Photos</label>
+            <div className="row gap-3 wrap" style={{ marginBottom: form.img.length ? 10 : 0 }}>
+              {form.img.map((src, i) => (
+                <span key={src} style={{ position: 'relative', width: 72, height: 72, borderRadius: 8, overflow: 'hidden', flex: 'none' }}>
+                  <img src={src} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  {i === 0 && <span className="badge success" style={{ position: 'absolute', left: 3, bottom: 3, fontSize: 9, padding: '1px 5px' }}>Cover</span>}
+                  <button
+                    type="button"
+                    className="iconbtn danger"
+                    aria-label="Remove photo"
+                    onClick={() => removeImage(i)}
+                    style={{ position: 'absolute', top: 2, right: 2, width: 20, height: 20, background: 'rgba(0,0,0,.55)', color: '#fff' }}
+                  >
+                    <Icon name="x" className="icon icon-sm" style={{ width: 12, height: 12 }} />
+                  </button>
+                </span>
+              ))}
+            </div>
             <label className="dropzone" style={{ display: 'block', padding: 16 }}>
-              {uploading ? 'Uploading…' : form.img[0] ? 'Change photo' : 'Click to upload a photo'}
-              <input type="file" accept="image/*" className="sr-only" onChange={handleFile} />
+              {uploading ? 'Uploading…' : form.img.length ? 'Add another photo' : 'Click to upload a photo'}
+              <input type="file" accept="image/*" className="sr-only" onChange={handleFile} disabled={uploading} />
             </label>
-            {form.img[0] && (
-              <span style={{ display: 'block', width: 80, height: 80, borderRadius: 8, overflow: 'hidden', marginTop: 8 }}>
-                <img src={form.img[0]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              </span>
-            )}
+            <span className="field-hint">The first photo is used as the cover image everywhere on the site.</span>
           </div>
           <div className="field">
             <label>Name</label>
@@ -181,6 +205,10 @@ export default function Cakes() {
               </select>
             </div>
             <div className="field">
+              <label>Flavour</label>
+              <input className="input" value={form.flavour} onChange={(e) => setForm({ ...form, flavour: e.target.value })} placeholder="e.g. Belgian Chocolate" />
+            </div>
+            <div className="field">
               <label>Base price (0.5 KG)</label>
               <input className="input" type="number" value={form.base} onChange={(e) => setForm({ ...form, base: e.target.value })} placeholder="e.g. 649" />
             </div>
@@ -192,16 +220,34 @@ export default function Cakes() {
                 <option>Out of stock</option>
               </select>
             </div>
-            <div className="field">
+            <div className="field span2">
               <label>Tag (optional)</label>
               <input className="input" value={form.tag} onChange={(e) => setForm({ ...form, tag: e.target.value })} placeholder="Bestseller, New..." />
             </div>
-            <div className="field span2">
-              <label className="check">
-                <input type="checkbox" checked={form.corporate} onChange={(e) => setForm({ ...form, corporate: e.target.checked })} />
-                Show in Corporate Cakes (bulk/office gifting page)
-              </label>
-            </div>
+          </div>
+          <div className="field">
+            <label>Description</label>
+            <textarea
+              className="textarea"
+              rows={3}
+              value={form.desc}
+              onChange={(e) => setForm({ ...form, desc: e.target.value })}
+              placeholder="Shown on the cake's product page, e.g. Layers of dark chocolate sponge soaked in cocoa syrup…"
+            />
+          </div>
+          <div className="form-grid two">
+            <label className="check">
+              <input type="checkbox" checked={form.eggless} onChange={(e) => setForm({ ...form, eggless: e.target.checked })} />
+              Eggless
+            </label>
+            <label className="check">
+              <input type="checkbox" checked={form.veg} onChange={(e) => setForm({ ...form, veg: e.target.checked })} />
+              Pure veg
+            </label>
+            <label className="check span2">
+              <input type="checkbox" checked={form.corporate} onChange={(e) => setForm({ ...form, corporate: e.target.checked })} />
+              Show in Corporate Cakes (bulk/office gifting page)
+            </label>
           </div>
         </form>
       </Modal>

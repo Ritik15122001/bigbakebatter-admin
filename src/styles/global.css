@@ -141,6 +141,7 @@ strong, b { font-weight: 600; color: var(--c-ink); }
 
 .field { display: flex; flex-direction: column; gap: 7px; }
 .field > label, .lbl { font-size: var(--fs-xs); font-weight: 600; color: var(--c-ink); letter-spacing: 0.02em; }
+.field-hint { font-size: var(--fs-xs); color: var(--c-muted); }
 .input, .select, .textarea {
   width: 100%; background: var(--c-surface); border: 1px solid var(--c-border-strong); border-radius: var(--r-sm);
   padding: 11px 14px; font-size: var(--fs-base); color: var(--c-ink);
