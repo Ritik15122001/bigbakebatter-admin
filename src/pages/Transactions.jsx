@@ -5,7 +5,7 @@ import Modal from '../components/common/Modal';
 import EmptyState from '../components/common/EmptyState';
 import { transactionService } from '../services/transactionService';
 import { useUiStore } from '../store/uiStore';
-import { money, fmtDate, fmtTime } from '../utils/format';
+import { money, fmtDate, fmtTime, fmtDateTime } from '../utils/format';
 
 const STATUSES = ['All', 'Paid', 'Refunded', 'Failed'];
 const METHODS = ['All', 'UPI', 'Card', 'Net Banking'];
@@ -20,6 +20,7 @@ export default function Transactions() {
   const [list, setList] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refunding, setRefunding] = useState(null);
+  const [viewing, setViewing] = useState(null);
   const [busy, setBusy] = useState(false);
 
   const [q, setQ] = useState('');
@@ -239,7 +240,7 @@ export default function Transactions() {
                 </thead>
                 <tbody>
                   {list.map((t) => (
-                    <tr key={t._id}>
+                    <tr key={t._id} onClick={() => setViewing(t)} style={{ cursor: 'pointer' }}>
                       <td><span className="cell-main" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.8em' }}>{t.txnId}</span></td>
                       <td>
                         {t.orderCode ? (
@@ -267,13 +268,14 @@ export default function Transactions() {
                           {t.status}
                         </span>
                       </td>
-                      <td className="act">
-                        {t.status === 'Paid' ? (
+                      <td className="act rowact" onClick={(e) => e.stopPropagation()}>
+                        <button className="iconbtn" title="View transaction details" aria-label="View details" onClick={() => setViewing(t)}>
+                          <Icon name="eye" className="icon icon-sm" />
+                        </button>
+                        {t.status === 'Paid' && (
                           <button className="iconbtn" title="Refund this transaction" aria-label="Refund" onClick={() => setRefunding(t)}>
                             <Icon name="refresh" className="icon icon-sm" />
                           </button>
-                        ) : (
-                          <span className="tiny muted">{t.status === 'Refunded' && t.refundedAt ? fmtDate(t.refundedAt) : ''}</span>
                         )}
                       </td>
                     </tr>
@@ -308,6 +310,78 @@ export default function Transactions() {
             This marks the {money(refunding.amount)} payment for order <b>{refunding.orderCode}</b> ({refunding.customer}) as refunded
             and cancels the order. This cannot be undone from here.
           </p>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!viewing}
+        onClose={() => setViewing(null)}
+        kicker="Payment receipt"
+        title={viewing?.txnId}
+        width={560}
+        foot={
+          viewing?.status === 'Paid' && (
+            <button
+              className="btn btn-primary"
+              style={{ background: 'var(--c-error)' }}
+              onClick={() => { setRefunding(viewing); setViewing(null); }}
+            >
+              <Icon name="refresh" className="icon icon-sm" />
+              Refund this payment
+            </button>
+          )
+        }
+      >
+        {viewing && (
+          <div className="stack gap-5">
+            <div className="dv-top">
+              <span className="row gap-3 center">
+                <span className="dv-top-ico">
+                  <Icon name={STATUS_ICON[viewing.status]} className="icon icon-md" />
+                </span>
+                <span className="stack gap-1">
+                  <b style={{ fontSize: '1.05rem' }} className="dv-mono">{viewing.txnId}</b>
+                  <span className="tiny muted">{fmtDateTime(viewing.paidAt)}</span>
+                </span>
+              </span>
+              <span className="stack gap-1" style={{ alignItems: 'flex-end' }}>
+                <span className="dv-top-amt">{money(viewing.amount)}</span>
+                <span className={`badge ${STATUS_TONE[viewing.status]}`}>{viewing.status}</span>
+              </span>
+            </div>
+
+            <div>
+              <p className="dv-sec-title">Order &amp; customer</p>
+              <div className="dv-grid">
+                <div className="dv-field">
+                  <label>Order</label>
+                  <div className="v">
+                    {viewing.orderCode ? <Link className="a-linkbtn" to="/orders" onClick={() => setViewing(null)}>{viewing.orderCode}</Link> : '—'}
+                  </div>
+                </div>
+                <div className="dv-field"><label>Method</label><div className="v">{viewing.method}</div></div>
+                <div className="dv-field"><label>Customer</label><div className="v">{viewing.customer}</div></div>
+                <div className="dv-field"><label>Email</label><div className="v">{viewing.email || '—'}</div></div>
+              </div>
+            </div>
+
+            <div>
+              <p className="dv-sec-title">Razorpay reference</p>
+              <div className="dv-grid">
+                <div className="dv-field full"><label>Razorpay order ID</label><div className="v dv-mono">{viewing.razorpayOrderId || '—'}</div></div>
+                <div className="dv-field full"><label>Razorpay payment ID</label><div className="v dv-mono">{viewing.razorpayPaymentId || '—'}</div></div>
+              </div>
+            </div>
+
+            {viewing.status === 'Refunded' && (
+              <div>
+                <p className="dv-sec-title">Refund</p>
+                <div className="dv-grid">
+                  <div className="dv-field full"><label>Refunded on</label><div className="v">{viewing.refundedAt ? fmtDateTime(viewing.refundedAt) : '—'}</div></div>
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </Modal>
     </>

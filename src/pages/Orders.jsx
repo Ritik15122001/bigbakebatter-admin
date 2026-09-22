@@ -93,8 +93,9 @@ export default function Orders() {
                     </select>
                   </td>
                   <td className="act rowact" onClick={(e) => e.stopPropagation()}>
-                    <button className="iconbtn" title="View order details" aria-label="View" onClick={() => setActive(o)}>
-                      <Icon name="aright" className="icon icon-sm" />
+                    <button className="iconbtn wide" title="View order details" aria-label="View order details" onClick={() => setActive(o)}>
+                      <Icon name="eye" className="icon icon-sm" />
+                      View
                     </button>
                   </td>
                 </tr>
@@ -104,26 +105,67 @@ export default function Orders() {
         </div>
       )}
 
-      <Modal open={!!active} onClose={() => setActive(null)} kicker="Order detail" title={active?.code}>
+      <Modal open={!!active} onClose={() => setActive(null)} kicker="Order detail" title={active?.code} width={620}>
         {active && (
-          <div className="stack gap-4">
-            <div className="row between">
-              <b>{active.customer}</b>
-              <span className={`badge ${active.status === 'Delivered' ? 'success' : active.status === 'Cancelled' ? 'err' : 'warn'}`}>{active.status}</span>
+          <div className="stack gap-5">
+            <div className="dv-top">
+              <span className="row gap-3 center">
+                <span className="dv-top-ico">
+                  <Icon name="bag" className="icon icon-md" />
+                </span>
+                <span className="stack gap-1">
+                  <b style={{ fontSize: '1.1rem' }}>{active.code}</b>
+                  <span className="tiny muted">Placed {fmtDateTime(active.createdAt)}</span>
+                </span>
+              </span>
+              <span className="stack gap-1" style={{ alignItems: 'flex-end' }}>
+                <span className="dv-top-amt">{money(active.amount)}</span>
+                <span className={`badge ${active.status === 'Delivered' ? 'success' : active.status === 'Cancelled' ? 'err' : 'warn'}`}>{active.status}</span>
+              </span>
             </div>
-            <p className="small muted">{active.email} · {active.phone}</p>
-            {active.items.map((it, i) => (
-              <div className="sum-row" key={i}>
-                <span>{it.name} × {it.qty} ({it.weight})</span>
-                <span>{money(it.line)}</span>
+
+            <div>
+              <p className="dv-sec-title">Items</p>
+              <div className="dv-items">
+                {active.items.map((it, i) => (
+                  <div className="dv-item" key={i}>
+                    <span className="grow small">{it.name} <span className="muted">&times; {it.qty}</span> {it.weight && <span className="muted">({it.weight})</span>}</span>
+                    <b className="small">{money(it.line)}</b>
+                  </div>
+                ))}
               </div>
-            ))}
-            <div className="sum-row total"><span>Total</span><span>{money(active.amount)}</span></div>
-            <div className="sum-row"><span>Placed on</span><span>{fmtDateTime(active.createdAt)}</span></div>
-            <div className="sum-row"><span>Delivery</span><span>{active.deliver} · {active.slot}</span></div>
-            <div className="sum-row"><span>Address</span><span style={{ textAlign: 'right', maxWidth: '60%' }}>{active.addr}</span></div>
-            <div className="sum-row"><span>Payment</span><span>{active.pay}</span></div>
-            {active.msg && <div className="sum-row"><span>Cake message</span><span>"{active.msg}"</span></div>}
+              <div className="sum-row total"><span>Total</span><span>{money(active.amount)}</span></div>
+            </div>
+
+            <div>
+              <p className="dv-sec-title">Customer</p>
+              <div className="dv-grid">
+                <div className="dv-field"><label>Name</label><div className="v">{active.customer}</div></div>
+                <div className="dv-field"><label>Phone</label><div className="v">{active.phone}</div></div>
+                <div className="dv-field full"><label>Email</label><div className="v">{active.email}</div></div>
+                <div className="dv-field full"><label>Delivery address</label><div className="v">{active.addr}</div></div>
+              </div>
+            </div>
+
+            <div>
+              <p className="dv-sec-title">Delivery</p>
+              <div className="dv-grid">
+                <div className="dv-field"><label>Deliver by</label><div className="v">{active.deliver || '—'}</div></div>
+                <div className="dv-field"><label>Slot</label><div className="v">{active.slot || '—'}</div></div>
+                {active.msg && <div className="dv-field full"><label>Cake message</label><div className="v">&ldquo;{active.msg}&rdquo;</div></div>}
+                {active.notes && <div className="dv-field full"><label>Notes</label><div className="v">{active.notes}</div></div>}
+              </div>
+            </div>
+
+            <div>
+              <p className="dv-sec-title">Payment</p>
+              <div className="dv-grid">
+                <div className="dv-field"><label>Method</label><div className="v">{active.pay}</div></div>
+                <div className="dv-field"><label>Amount paid</label><div className="v">{money(active.amount)}</div></div>
+                <div className="dv-field full"><label>Razorpay order ID</label><div className="v dv-mono">{active.razorpayOrderId || '—'}</div></div>
+                <div className="dv-field full"><label>Razorpay payment ID</label><div className="v dv-mono">{active.razorpayPaymentId || '—'}</div></div>
+              </div>
+            </div>
           </div>
         )}
       </Modal>

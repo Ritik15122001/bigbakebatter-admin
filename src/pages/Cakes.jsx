@@ -7,9 +7,20 @@ import { uploadService } from '../services/uploadService';
 import { useUiStore } from '../store/uiStore';
 import { money } from '../utils/format';
 
+// Same default multipliers the storefront uses to compute 1/1.5/2 KG prices
+// from the 0.5 KG base price when an admin hasn't set an explicit price for
+// that weight. Kept in sync with BigBakeBatter/src/data/products.js.
+const WEIGHT_TIERS = [
+  { w: '1 KG', mult: 1.7 },
+  { w: '1.5 KG', mult: 2.39 },
+  { w: '2 KG', mult: 3.08 },
+];
+const autoPrice = (base, mult) => Math.round(((Number(base) || 0) * mult) / 10) * 10;
+
 const EMPTY = {
   name: '', cat: '', flavour: '', base: '', stock: 'In stock', tag: '',
   eggless: true, veg: true, corporate: false, desc: '', img: [],
+  weights: { '1 KG': '', '1.5 KG': '', '2 KG': '' },
 };
 
 export default function Cakes() {
@@ -47,9 +58,11 @@ export default function Cakes() {
   };
   const openEdit = (p) => {
     setEditing(p._id);
+    const weightMap = new Map((p.weights || []).map((w) => [w.w, w.price]));
     setForm({
       name: p.name, cat: p.cat, flavour: p.flavour || '', base: p.base, stock: p.stock, tag: p.tag,
       eggless: p.eggless !== false, veg: p.veg !== false, corporate: !!p.corporate, desc: p.desc || '', img: p.img || [],
+      weights: Object.fromEntries(WEIGHT_TIERS.map((t) => [t.w, weightMap.has(t.w) ? String(weightMap.get(t.w)) : ''])),
     });
   };
 
@@ -78,12 +91,19 @@ export default function Cakes() {
       pushToast({ title: 'Fill in name and price', kind: 'err' });
       return;
     }
+    // Only tiers the admin actually typed a price for are saved as an
+    // override; anything left blank keeps following the storefront's
+    // default multiplier of the base price.
+    const weights = WEIGHT_TIERS
+      .filter((t) => form.weights[t.w] !== '')
+      .map((t) => ({ w: t.w, price: Number(form.weights[t.w]) }));
+    const payload = { ...form, base: Number(form.base), weights };
     try {
       if (editing === 'new') {
-        await productService.create({ ...form, base: Number(form.base) });
+        await productService.create(payload);
         pushToast({ title: 'Cake added', kind: 'ok' });
       } else {
-        await productService.update(editing, { ...form, base: Number(form.base) });
+        await productService.update(editing, payload);
         pushToast({ title: 'Cake updated', kind: 'ok' });
       }
       setEditing(null);
@@ -225,6 +245,39 @@ export default function Cakes() {
               <input className="input" value={form.tag} onChange={(e) => setForm({ ...form, tag: e.target.value })} placeholder="Bestseller, New..." />
             </div>
           </div>
+
+          <div className="field">
+            <label>Pricing by weight</label>
+            <div className="weight-price-grid">
+              <div className="weight-price-row">
+                <span className="w-lab">0.5 KG</span>
+                <span className="w-val">{money(Number(form.base) || 0)}</span>
+                <span className="tiny muted">Base price, set above</span>
+              </div>
+              {WEIGHT_TIERS.map((t) => (
+                <div className="weight-price-row" key={t.w}>
+                  <span className="w-lab">{t.w}</span>
+                  <input
+                    className="input"
+                    type="number"
+                    min="0"
+                    value={form.weights[t.w]}
+                    onChange={(e) => setForm({ ...form, weights: { ...form.weights, [t.w]: e.target.value } })}
+                    placeholder={String(autoPrice(form.base, t.mult))}
+                  />
+                  {form.weights[t.w] === '' ? (
+                    <span className="tiny muted">Auto &middot; {money(autoPrice(form.base, t.mult))}</span>
+                  ) : (
+                    <button type="button" className="tiny link-underline" onClick={() => setForm({ ...form, weights: { ...form.weights, [t.w]: '' } })}>
+                      Reset to auto
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <span className="field-hint">Leave a weight blank to auto-price it from the base price. Set a value to override it for this cake.</span>
+          </div>
+
           <div className="field">
             <label>Description</label>
             <textarea
