@@ -764,6 +764,22 @@ strong, b { font-weight: 600; color: var(--c-ink); }
 
 .link-underline { background: none; border: 0; padding: 0; cursor: pointer; color: var(--c-accent-ink); font: inherit; text-decoration: underline; text-underline-offset: 2px; }
 
+/* Order detail page: status stepper + quick-status pills */
+.od-steps { display: flex; align-items: center; }
+.od-step { display: flex; align-items: center; gap: 10px; flex: 1; }
+.od-step:last-child { flex: none; }
+.od-step-dot { width: 26px; height: 26px; border-radius: 50%; background: var(--c-surface-2); border: 1px solid var(--c-border-strong); color: var(--c-muted); display: grid; place-items: center; font-size: var(--fs-xs); font-weight: 700; flex: none; }
+.od-step.done .od-step-dot { background: var(--c-accent); border-color: var(--c-accent); color: #fff; }
+.od-step.current .od-step-dot { background: #fff; border-color: var(--c-accent); color: var(--c-accent); box-shadow: 0 0 0 3px var(--c-accent-soft); }
+.od-step-lab { font-size: var(--fs-xs); font-weight: 600; color: var(--c-muted); white-space: nowrap; }
+.od-step.done .od-step-lab, .od-step.current .od-step-lab { color: var(--c-ink); }
+.od-step:not(:last-child)::after { content: ''; flex: 1; height: 2px; background: var(--c-border-strong); margin: 0 4px; }
+.od-step.done:not(:last-child)::after { background: var(--c-accent); }
+@media (max-width: 719px) { .od-step-lab { display: none; } }
+
+.od-quickstatus { cursor: pointer; border: 0; }
+.od-quickstatus:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .weight-price-grid { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--c-border); border-radius: var(--r-md); padding: 10px 14px; }
 .weight-price-row { display: grid; grid-template-columns: 64px 1fr 130px; align-items: center; gap: 12px; padding: 4px 0; }
 .weight-price-row + .weight-price-row { border-top: 1px solid var(--c-border); padding-top: 10px; }
@@ -991,6 +1007,8 @@ strong, b { font-weight: 600; color: var(--c-ink); }
 .kpi .kv { font-family: var(--f-sans); font-weight: 700; font-size: 1.85rem; color: var(--c-ink); line-height: 1; margin-bottom: 5px; }
 .kpi .kl { font-size: var(--fs-xs); color: var(--c-muted); }
 .kpi .kd { font-size: var(--fs-xs); font-weight: 600; margin-top: 8px; display: flex; align-items: center; gap: 4px; }
+.a-back { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); font-weight: 600; color: var(--c-muted); width: fit-content; }
+.a-back:hover { color: var(--c-ink); }
 .a-panel { background: #fff; border: 1px solid var(--c-border); border-radius: var(--r-lg); overflow: hidden; }
 .a-panel-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-4); padding: var(--s-5); border-bottom: 1px solid var(--c-border); flex-wrap: wrap; }
 .a-panel-head h3 { font-size: 1.05rem; font-family: var(--f-sans); font-weight: 700; }

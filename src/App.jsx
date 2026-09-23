@@ -6,6 +6,7 @@ import Login from './pages/Login';
 import AdminLayout from './pages/AdminLayout';
 import Dashboard from './pages/Dashboard';
 import Orders from './pages/Orders';
+import OrderDetail from './pages/OrderDetail';
 import Transactions from './pages/Transactions';
 import Cakes from './pages/Cakes';
 import CategoriesStock from './pages/CategoriesStock';
@@ -36,6 +37,7 @@ export default function App() {
         >
           <Route index element={<Dashboard />} />
           <Route path="orders" element={<Orders />} />
+          <Route path="orders/:id" element={<OrderDetail />} />
           <Route path="transactions" element={<Transactions />} />
           <Route path="cakes" element={<Cakes />} />
           <Route path="stock" element={<CategoriesStock />} />
