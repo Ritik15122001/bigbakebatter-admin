@@ -38,34 +38,38 @@ export default function Dashboard() {
   return (
     <>
       <div className="kpi-grid">
-        <div className="kpi">
+        <button className="kpi clickable" onClick={() => navigate('/transactions')}>
           <span className="kico" style={{ background: KPI_ICON_TONE.revenue.bg, color: KPI_ICON_TONE.revenue.color }}>
             <Icon name="percent" className="icon icon-sm" />
           </span>
           <div className="kv">{money(totalRevenue)}</div>
           <div className="kl">Total revenue</div>
-        </div>
-        <div className="kpi">
+          <Icon name="aright" className="icon icon-sm kgo" />
+        </button>
+        <button className="kpi clickable" onClick={() => navigate('/orders')}>
           <span className="kico" style={{ background: KPI_ICON_TONE.orders.bg, color: KPI_ICON_TONE.orders.color }}>
             <Icon name="bag" className="icon icon-sm" />
           </span>
           <div className="kv">{totalOrders}</div>
           <div className="kl">Total orders</div>
-        </div>
-        <div className="kpi">
+          <Icon name="aright" className="icon icon-sm kgo" />
+        </button>
+        <button className="kpi clickable" onClick={() => navigate('/transactions')}>
           <span className="kico" style={{ background: KPI_ICON_TONE.aov.bg, color: KPI_ICON_TONE.aov.color }}>
             <Icon name="gift" className="icon icon-sm" />
           </span>
           <div className="kv">{money(aov)}</div>
           <div className="kl">Average order value</div>
-        </div>
-        <div className="kpi">
+          <Icon name="aright" className="icon icon-sm kgo" />
+        </button>
+        <button className="kpi clickable" onClick={() => navigate('/enquiries')}>
           <span className="kico" style={{ background: KPI_ICON_TONE.enquiries.bg, color: KPI_ICON_TONE.enquiries.color }}>
             <Icon name="msg" className="icon icon-sm" />
           </span>
           <div className="kv">{pendingEnquiries.length}</div>
           <div className="kl">Pending custom enquiries</div>
-        </div>
+          <Icon name="aright" className="icon icon-sm kgo" />
+        </button>
       </div>
 
       <div className="a-grid-2">
@@ -107,7 +111,7 @@ export default function Dashboard() {
                 </thead>
                 <tbody>
                   {summary.recent.map((t) => (
-                    <tr key={t._id} onClick={() => navigate('/transactions')}>
+                    <tr key={t._id} className={Date.now() - new Date(t.paidAt).getTime() < 5 * 60 * 1000 ? 'row-new' : ''} onClick={() => navigate('/transactions')}>
                       <td>
                         <span className="cell-main">{t.orderCode || t.txnId}</span>
                         <span className="cell-sub">{fmtTime(t.paidAt)}</span>
@@ -179,7 +183,7 @@ export default function Dashboard() {
                 </thead>
                 <tbody>
                   {recentOrders.map((o) => (
-                    <tr key={o._id} onClick={() => navigate('/orders')}>
+                    <tr key={o._id} className={o.status === 'New' ? 'row-new' : ''} onClick={() => navigate('/orders')}>
                       <td>
                         <span className="cell-main">{o.code}</span>
                         <span className="cell-sub">{new Date(o.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</span>

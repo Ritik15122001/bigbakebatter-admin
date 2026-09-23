@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Icon from '../components/common/Icon';
+import NotificationBell from '../components/common/NotificationBell';
 import { orderService } from '../services/orderService';
 import { enquiryService } from '../services/enquiryService';
 import { useAuthStore } from '../store/authStore';
@@ -109,6 +110,7 @@ export default function AdminLayout() {
               <Icon name="external" className="icon icon-sm" />
               Storefront
             </a>
+            <NotificationBell />
           </div>
         </header>
         <div className="a-body">
