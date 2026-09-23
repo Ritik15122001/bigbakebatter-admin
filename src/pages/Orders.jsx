@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '../components/common/Icon';
 import EmptyState from '../components/common/EmptyState';
+import Pagination from '../components/common/Pagination';
 import { orderService } from '../services/orderService';
 import { useUiStore } from '../store/uiStore';
 import { money } from '../utils/format';
@@ -16,6 +17,8 @@ export default function Orders() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('All');
   const [q, setQ] = useState('');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
 
   const load = () => {
     setLoading(true);
@@ -35,6 +38,8 @@ export default function Orders() {
       return true;
     });
   }, [orders, tab, q]);
+  useEffect(() => setPage(1), [tab, q]);
+  const paged = useMemo(() => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [filtered, page]);
 
   const handleStatusChange = async (id, status) => {
     try {
@@ -69,13 +74,14 @@ export default function Orders() {
       ) : filtered.length === 0 ? (
         <EmptyState icon="bag" title="No orders match this filter" message="Try a different status tab or clear your search." />
       ) : (
+        <>
         <div className="a-table-wrap">
           <table className="tbl">
             <thead>
               <tr><th>Order</th><th>Customer</th><th>Items</th><th className="num">Amount</th><th className="tight">Status</th><th className="act" /></tr>
             </thead>
             <tbody>
-              {filtered.map((o) => (
+              {paged.map((o) => (
                 <tr key={o._id} className={o.status === 'New' ? 'row-new' : ''}>
                   <td onClick={() => openOrder(o._id)}>
                     <span className="cell-main">{o.code}</span>
@@ -105,6 +111,8 @@ export default function Orders() {
             </tbody>
           </table>
         </div>
+        <Pagination page={page} pageSize={PAGE_SIZE} total={filtered.length} onPage={setPage} />
+        </>
       )}
     </div>
   );

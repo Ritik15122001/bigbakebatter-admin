@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import Icon from '../components/common/Icon';
 import Modal from '../components/common/Modal';
 import EmptyState from '../components/common/EmptyState';
+import Pagination from '../components/common/Pagination';
 import { transactionService } from '../services/transactionService';
 import { useUiStore } from '../store/uiStore';
 import { money, fmtDate, fmtTime, fmtDateTime } from '../utils/format';
@@ -28,6 +29,8 @@ export default function Transactions() {
   const [method, setMethod] = useState('All');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
 
   useEffect(() => {
     transactionService.summary().then(setSummary).catch(() => {});
@@ -48,6 +51,8 @@ export default function Transactions() {
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
+  useEffect(() => setPage(1), [q, status, method, from, to]);
+  const paged = useMemo(() => (list || []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [list, page]);
 
   const clearFilters = () => {
     setQ(''); setStatus('All'); setMethod('All'); setFrom(''); setTo('');
@@ -239,7 +244,7 @@ export default function Transactions() {
                   </tr>
                 </thead>
                 <tbody>
-                  {list.map((t) => (
+                  {paged.map((t) => (
                     <tr key={t._id} onClick={() => setViewing(t)} style={{ cursor: 'pointer' }}>
                       <td><span className="cell-main" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.8em' }}>{t.txnId}</span></td>
                       <td>
@@ -287,6 +292,7 @@ export default function Transactions() {
               <span>Showing <b>{list.length}</b> transaction{list.length === 1 ? '' : 's'}</span>
               <span className="rtotal">Total shown: <b>{money(shownTotal)}</b></span>
             </div>
+            <Pagination page={page} pageSize={PAGE_SIZE} total={list.length} onPage={setPage} />
           </>
         )}
       </div>

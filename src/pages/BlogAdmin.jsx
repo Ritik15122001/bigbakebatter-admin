@@ -1,16 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Icon from '../components/common/Icon';
 import Modal from '../components/common/Modal';
+import EmptyState from '../components/common/EmptyState';
+import Pagination from '../components/common/Pagination';
 import { blogService } from '../services/blogService';
 import { uploadService } from '../services/uploadService';
 import { useUiStore } from '../store/uiStore';
 
 const EMPTY = { title: '', cat: 'Guides', excerpt: '', body: '', status: 'Draft', img: '' };
+const PAGE_SIZE = 10;
 
 export default function BlogAdmin() {
   const pushToast = useUiStore((s) => s.pushToast);
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState('');
+  const [page, setPage] = useState(1);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY);
   const [uploading, setUploading] = useState(false);
@@ -22,6 +27,13 @@ export default function BlogAdmin() {
   };
 
   useEffect(load, []);
+
+  const filtered = useMemo(
+    () => list.filter((b) => `${b.title} ${b.cat}`.toLowerCase().includes(q.toLowerCase())),
+    [list, q]
+  );
+  useEffect(() => setPage(1), [q]);
+  const paged = useMemo(() => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [filtered, page]);
 
   const togglePublish = async (post) => {
     const status = post.status === 'Published' ? 'Draft' : 'Published';
@@ -91,23 +103,34 @@ export default function BlogAdmin() {
   return (
     <div className="a-panel">
       <div className="a-panel-head">
-        <h3>Blog articles</h3>
-        <button className="btn btn-primary btn-sm" onClick={openAdd}>
-          <Icon name="plus" className="icon icon-sm" />
-          New article
-        </button>
+        <div className="row gap-3 center">
+          <h3>Blog articles</h3>
+          {!loading && <span className="a-count">{filtered.length} article{filtered.length === 1 ? '' : 's'}</span>}
+        </div>
+        <div className="row gap-3 center">
+          <div className="field" style={{ minWidth: 220 }}>
+            <input className="input" placeholder="Search articles..." value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
+          <button className="btn btn-primary btn-sm" onClick={openAdd}>
+            <Icon name="plus" className="icon icon-sm" />
+            New article
+          </button>
+        </div>
       </div>
 
       {loading ? (
         <div className="a-empty"><p className="muted">Loading…</p></div>
+      ) : filtered.length === 0 ? (
+        <EmptyState icon="news" title="No articles found" message="Try a different search, or write a new one." />
       ) : (
+        <>
         <div className="a-table-wrap">
           <table className="tbl">
             <thead>
               <tr><th>Article</th><th>Category</th><th>Date</th><th>Views</th><th>Status</th><th /></tr>
             </thead>
             <tbody>
-              {list.map((b) => (
+              {paged.map((b) => (
                 <tr key={b._id}>
                   <td>
                     <span className="row gap-3 center">
@@ -138,6 +161,8 @@ export default function BlogAdmin() {
             </tbody>
           </table>
         </div>
+        <Pagination page={page} pageSize={PAGE_SIZE} total={filtered.length} onPage={setPage} />
+        </>
       )}
 
       <Modal

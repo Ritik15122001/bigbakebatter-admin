@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import Icon from '../components/common/Icon';
+import Modal from '../components/common/Modal';
 import { bannerService } from '../services/bannerService';
 import { uploadService } from '../services/uploadService';
 import { useUiStore } from '../store/uiStore';
@@ -10,6 +11,8 @@ export default function Banners() {
   const [loading, setLoading] = useState(true);
   const [activeId, setActiveId] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [deleting, setDeleting] = useState(null);
 
   const load = () => {
     setLoading(true);
@@ -49,6 +52,45 @@ export default function Banners() {
     }
   };
 
+  const addBanner = async () => {
+    setAdding(true);
+    try {
+      const created = await bannerService.create({
+        kicker: 'New banner',
+        headline: 'New banner headline',
+        sub: '',
+        cta: 'Shop now',
+        ctaHref: '/shop',
+        badge: ['', ''],
+        status: 'Draft',
+        order: list.length,
+        img: 'https://placehold.co/1200x600?text=Banner',
+      });
+      setList((prev) => [...prev, created]);
+      setActiveId(created._id);
+      pushToast({ title: 'Banner added', kind: 'ok' });
+    } catch (e) {
+      pushToast({ title: 'Could not add banner', subtitle: e.message, kind: 'err' });
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    try {
+      await bannerService.remove(deleting._id);
+      setList((prev) => {
+        const next = prev.filter((b) => b._id !== deleting._id);
+        setActiveId((cur) => (cur === deleting._id ? next[0]?._id : cur));
+        return next;
+      });
+      pushToast({ title: 'Banner deleted', kind: 'info' });
+      setDeleting(null);
+    } catch (e) {
+      pushToast({ title: 'Delete failed', subtitle: e.message, kind: 'err' });
+    }
+  };
+
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file || !active) return;
@@ -70,8 +112,13 @@ export default function Banners() {
       <div className="a-panel">
         <div className="a-panel-head">
           <h3>Homepage banners</h3>
+          <button className="btn btn-primary btn-sm" onClick={addBanner} disabled={adding}>
+            <Icon name="plus" className="icon icon-sm" />
+            Add banner
+          </button>
         </div>
         <div className="banner-list" style={{ padding: 'var(--s-5)' }}>
+          {list.length === 0 && <p className="muted">No banners yet. Add one to feature it on the homepage.</p>}
           {list.map((b) => (
             <div key={b._id} className={`banner-item ${b._id === activeId ? 'on' : ''}`} onClick={() => setActiveId(b._id)}>
               <span className="bth">
@@ -87,6 +134,9 @@ export default function Banners() {
                 </button>
                 <button className="iconbtn" aria-label="Move down" onClick={() => move(b._id, 1)}>
                   <Icon name="arrowdown" className="icon icon-sm" />
+                </button>
+                <button className="iconbtn danger" aria-label="Delete banner" onClick={() => setDeleting(b)}>
+                  <Icon name="x" className="icon icon-sm" />
                 </button>
               </span>
             </div>
@@ -166,6 +216,21 @@ export default function Banners() {
           </div>
         </div>
       )}
+
+      <Modal
+        open={!!deleting}
+        onClose={() => setDeleting(null)}
+        kicker="Confirm"
+        title={`Delete "${deleting?.headline}"?`}
+        foot={
+          <>
+            <button className="btn btn-ghost" onClick={() => setDeleting(null)}>Cancel</button>
+            <button className="btn btn-primary" style={{ background: 'var(--c-error)' }} onClick={confirmDelete}>Delete</button>
+          </>
+        }
+      >
+        <p className="muted">This removes the banner permanently from the homepage.</p>
+      </Modal>
     </div>
   );
 }

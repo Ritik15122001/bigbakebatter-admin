@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import Icon from '../components/common/Icon';
 import Modal from '../components/common/Modal';
+import EmptyState from '../components/common/EmptyState';
+import Pagination from '../components/common/Pagination';
 import { productService } from '../services/productService';
 import { categoryService } from '../services/catalogService';
 import { uploadService } from '../services/uploadService';
@@ -29,10 +31,13 @@ export default function Cakes() {
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
+  const [catFilter, setCatFilter] = useState('All');
+  const [page, setPage] = useState(1);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY);
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState(null);
+  const PAGE_SIZE = 10;
 
   const load = () => {
     setLoading(true);
@@ -48,9 +53,11 @@ export default function Cakes() {
   useEffect(load, []);
 
   const filtered = useMemo(
-    () => list.filter((p) => `${p.name} ${p.cat}`.toLowerCase().includes(q.toLowerCase())),
-    [list, q]
+    () => list.filter((p) => (catFilter === 'All' || p.cat === catFilter) && `${p.name} ${p.cat}`.toLowerCase().includes(q.toLowerCase())),
+    [list, q, catFilter]
   );
+  useEffect(() => setPage(1), [q, catFilter]);
+  const paged = useMemo(() => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [filtered, page]);
 
   const openAdd = () => {
     setEditing('new');
@@ -127,8 +134,17 @@ export default function Cakes() {
   return (
     <div className="a-panel">
       <div className="a-panel-head">
-        <div className="field" style={{ minWidth: 240 }}>
-          <input className="input" placeholder="Search cakes..." value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="a-filters" style={{ border: 0, padding: 0 }}>
+          <div className="field f-grow">
+            <input className="input" placeholder="Search cakes..." value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
+          <div className="field f-sm">
+            <select className="select" value={catFilter} onChange={(e) => setCatFilter(e.target.value)}>
+              <option>All</option>
+              {categories.map((c) => <option key={c._id} value={c.name}>{c.name}</option>)}
+            </select>
+          </div>
+          {!loading && <span className="a-count">{filtered.length} cake{filtered.length === 1 ? '' : 's'}</span>}
         </div>
         <button className="btn btn-primary btn-sm" onClick={openAdd}>
           <Icon name="plus" className="icon icon-sm" />
@@ -138,44 +154,49 @@ export default function Cakes() {
 
       {loading ? (
         <div className="a-empty"><p className="muted">Loading cakes…</p></div>
+      ) : filtered.length === 0 ? (
+        <EmptyState icon="cake" title="No cakes found" message="Try a different search or category, or add a new cake." />
       ) : (
-        <div className="a-table-wrap">
-          <table className="tbl">
-            <thead>
-              <tr><th>Cake</th><th>Category</th><th>Price</th><th>Stock</th><th /></tr>
-            </thead>
-            <tbody>
-              {filtered.map((p) => (
-                <tr key={p._id}>
-                  <td>
-                    <span className="row gap-3 center">
-                      <span style={{ width: 40, height: 40, borderRadius: 8, overflow: 'hidden', flex: 'none', background: 'var(--c-bg-warm)' }}>
-                        {p.img?.[0] && <img src={p.img[0]} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+        <>
+          <div className="a-table-wrap">
+            <table className="tbl">
+              <thead>
+                <tr><th>Cake</th><th>Category</th><th className="num">Price</th><th className="tight">Stock</th><th className="act" /></tr>
+              </thead>
+              <tbody>
+                {paged.map((p) => (
+                  <tr key={p._id} onClick={() => openEdit(p)}>
+                    <td>
+                      <span className="row gap-3 center">
+                        <span style={{ width: 40, height: 40, borderRadius: 8, overflow: 'hidden', flex: 'none', background: 'var(--c-bg-warm)' }}>
+                          {p.img?.[0] && <img src={p.img[0]} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+                        </span>
+                        <span>
+                          <span className="cell-main">{p.name}</span>
+                          <span className="cell-sub">{p.tag || '—'}</span>
+                        </span>
                       </span>
-                      <span>
-                        <span className="cell-main">{p.name}</span>
-                        <span className="cell-sub">{p.tag || '—'}</span>
-                      </span>
-                    </span>
-                  </td>
-                  <td>{p.cat}</td>
-                  <td>{money(p.base)}</td>
-                  <td>
-                    <span className={`badge ${p.stock === 'Out of stock' ? 'err' : p.stock === 'Low stock' ? 'warn' : 'success'}`}>{p.stock}</span>
-                  </td>
-                  <td className="rowact">
-                    <button className="iconbtn" aria-label="Edit" onClick={() => openEdit(p)}>
-                      <Icon name="edit" className="icon icon-sm" />
-                    </button>
-                    <button className="iconbtn danger" aria-label="Delete" onClick={() => setDeleting(p)}>
-                      <Icon name="x" className="icon icon-sm" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                    </td>
+                    <td>{p.cat}</td>
+                    <td className="num cell-main">{money(p.base)}</td>
+                    <td className="tight">
+                      <span className={`badge ${p.stock === 'Out of stock' ? 'err' : p.stock === 'Low stock' ? 'warn' : 'success'}`}>{p.stock}</span>
+                    </td>
+                    <td className="act rowact" onClick={(e) => e.stopPropagation()}>
+                      <button className="iconbtn" aria-label="Edit" onClick={() => openEdit(p)}>
+                        <Icon name="edit" className="icon icon-sm" />
+                      </button>
+                      <button className="iconbtn danger" aria-label="Delete" onClick={() => setDeleting(p)}>
+                        <Icon name="trash" className="icon icon-sm" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Pagination page={page} pageSize={PAGE_SIZE} total={filtered.length} onPage={setPage} />
+        </>
       )}
 
       <Modal
