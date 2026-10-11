@@ -14,6 +14,9 @@ import BlogAdmin from './pages/BlogAdmin';
 import Customers from './pages/Customers';
 import Enquiries from './pages/Enquiries';
 import Banners from './pages/Banners';
+import Announcements from './pages/Announcements';
+import SiteContent from './pages/SiteContent';
+import Settings from './pages/Settings';
 import { useAuthStore } from './store/authStore';
 
 export default function App() {
@@ -45,6 +48,9 @@ export default function App() {
           <Route path="customers" element={<Customers />} />
           <Route path="enquiries" element={<Enquiries />} />
           <Route path="banners" element={<Banners />} />
+          <Route path="announcements" element={<Announcements />} />
+          <Route path="content" element={<SiteContent />} />
+          <Route path="settings" element={<Settings />} />
         </Route>
       </Routes>
       <ToastStack />

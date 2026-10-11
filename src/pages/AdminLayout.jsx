@@ -16,9 +16,12 @@ const NAV = [
   { to: '/customers', label: 'Customers', icon: 'user' },
   { to: '/enquiries', label: 'Enquiries', icon: 'msg' },
   { to: '/banners', label: 'Banners', icon: 'gift' },
+  { to: '/announcements', label: 'Announcements', icon: 'sparkles' },
+  { to: '/content', label: 'Site content', icon: 'star' },
+  { to: '/settings', label: 'Settings', icon: 'info' },
 ];
 
-const STOREFRONT_URL = 'http://localhost:5301';
+const STOREFRONT_URL = import.meta.env.VITE_STOREFRONT_URL || 'http://localhost:5301';
 
 export default function AdminLayout() {
   const location = useLocation();
