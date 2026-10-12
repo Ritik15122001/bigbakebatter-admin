@@ -16,3 +16,5 @@ export const addonService = simpleResource('/addons');
 export const faqService = simpleResource('/faqs');
 export const reviewService = simpleResource('/reviews');
 export const announcementService = simpleResource('/announcements');
+export const addonCategoryService = simpleResource('/addon-categories');
+export const couponService = simpleResource('/coupons');

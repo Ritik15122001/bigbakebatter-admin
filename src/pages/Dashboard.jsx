@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '../components/common/Icon';
 import EmptyState from '../components/common/EmptyState';
@@ -23,15 +23,27 @@ export default function Dashboard() {
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState('');
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setError('');
     dashboardService.getStats().then(setStats).catch((e) => setError(e.message));
     transactionService.summary().then(setSummary).catch(() => {});
   }, []);
 
-  if (error) return <div className="a-panel a-empty"><p className="muted">{error}</p></div>;
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  if (error) {
+    return (
+      <div className="a-panel a-empty">
+        <p className="muted">Could not load the dashboard: {error}</p>
+        <button className="btn btn-outline btn-sm" onClick={load}>Try again</button>
+      </div>
+    );
+  }
   if (!stats) return <div className="a-panel a-empty"><p className="muted">Loading dashboard…</p></div>;
 
-  const { totalRevenue, totalOrders, aov, pendingEnquiries, lowStock, topSelling, recentOrders } = stats;
+  const { totalRevenue = 0, totalOrders = 0, aov = 0, pendingEnquiries = [], lowStock = [], topSelling = [], recentOrders = [] } = stats;
   const maxDaily = Math.max(1, ...(summary?.daily || []).map((d) => d.revenue));
   const todayLabel = new Date().toLocaleDateString('en-GB', { weekday: 'short' });
 
@@ -72,175 +84,174 @@ export default function Dashboard() {
         </button>
       </div>
 
+      {/* Two independent columns so a tall panel never leaves a gap beside a short one. */}
       <div className="a-grid-2">
-        <div className="a-panel">
-          <div className="a-panel-head">
-            <h3>Revenue, last 7 days</h3>
-            <button className="btn btn-outline btn-sm" onClick={() => navigate('/transactions')}>Finance</button>
-          </div>
-          {summary ? (
-            <div className="fin-chart">
-              {summary.daily.map((d) => (
-                <div className={`fbar ${d.revenue === 0 ? 'zero' : ''} ${d.label === todayLabel ? 'on' : ''}`} key={d.date}>
-                  <span className="fval">{d.revenue > 0 ? money(d.revenue) : ''}</span>
-                  <span className="ftrack">
-                    <span className="ffill" style={{ height: `${Math.max(4, (d.revenue / maxDaily) * 100)}%` }} />
-                  </span>
-                  <span className="flab">
-                    <b>{d.label}</b>
-                    <span>{d.count}</span>
-                  </span>
-                </div>
-              ))}
+        <div className="stack gap-5">
+          <div className="a-panel">
+            <div className="a-panel-head">
+              <h3>Revenue, last 7 days</h3>
+              <button className="btn btn-outline btn-sm" onClick={() => navigate('/transactions')}>Finance</button>
             </div>
-          ) : (
-            <div className="a-empty small"><p className="muted">Loading…</p></div>
-          )}
+            {summary ? (
+              <div className="fin-chart">
+                {summary.daily.map((d) => (
+                  <div className={`fbar ${d.revenue === 0 ? 'zero' : ''} ${d.label === todayLabel ? 'on' : ''}`} key={d.date}>
+                    <span className="fval">{d.revenue > 0 ? money(d.revenue) : ''}</span>
+                    <span className="ftrack">
+                      <span className="ffill" style={{ height: `${Math.max(4, (d.revenue / maxDaily) * 100)}%` }} />
+                    </span>
+                    <span className="flab">
+                      <b>{d.label}</b>
+                      <span>{d.count}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="a-empty small"><p className="muted">Loading…</p></div>
+            )}
+          </div>
+          <div className="a-panel">
+            <div className="a-panel-head">
+              <h3>Top selling cakes</h3>
+            </div>
+            {topSelling.length === 0 ? (
+              <EmptyState small icon="cake" title="No sales yet" />
+            ) : (
+              <div className="a-table-wrap">
+                <table className="tbl tbl-mini">
+                  <thead>
+                    <tr><th>Cake</th><th>Sold</th><th>Revenue</th></tr>
+                  </thead>
+                  <tbody>
+                    {topSelling.map((p) => (
+                      <tr key={p._id} onClick={() => navigate('/cakes')}>
+                        <td>
+                          <span className="cell-main">{p.name}</span>
+                          <span className="cell-sub">{p.cat}</span>
+                        </td>
+                        <td>{p.sold}</td>
+                        <td>{money(p.sold * p.base)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          <div className="a-panel">
+            <div className="a-panel-head">
+              <h3>Low stock</h3>
+              <button className="btn btn-outline btn-sm" onClick={() => navigate('/stock')}>Manage</button>
+            </div>
+            {lowStock.length === 0 ? (
+              <EmptyState small icon="check" title="All cakes are well stocked" />
+            ) : (
+              <div className="stack gap-3" style={{ padding: 'var(--s-5)' }}>
+                {lowStock.map((p) => (
+                  <div className="row between center" key={p._id}>
+                    <span className="small">{p.name}</span>
+                    <span className={`badge ${p.stock === 'Out of stock' ? 'err' : 'warn'}`}>{p.stock === 'Out of stock' ? 'Out' : `${p.qty} left`}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
-
-        <div className="a-panel">
-          <div className="a-panel-head">
-            <h3>Recent payments</h3>
-            <button className="btn btn-outline btn-sm" onClick={() => navigate('/transactions')}>View all</button>
-          </div>
-          {summary && summary.recent.length > 0 ? (
-            <div className="a-table-wrap">
-              <table className="tbl tbl-mini">
-                <thead>
-                  <tr><th>Txn</th><th>Method</th><th>Amount</th></tr>
-                </thead>
-                <tbody>
-                  {summary.recent.map((t) => (
-                    <tr key={t._id} className={Date.now() - new Date(t.paidAt).getTime() < 5 * 60 * 1000 ? 'row-new' : ''} onClick={() => navigate('/transactions')}>
-                      <td>
-                        <span className="cell-main">{t.orderCode || t.txnId}</span>
-                        <span className="cell-sub">{fmtTime(t.paidAt)}</span>
-                      </td>
-                      <td>
-                        <span className="row gap-2 center small">
-                          <Icon name={METHOD_ICON[t.method]} className="icon icon-sm" style={{ color: 'var(--c-muted)' }} />
-                          {t.method}
-                        </span>
-                      </td>
-                      <td>
-                        <span className={t.status === 'Refunded' ? 'muted' : 'cell-main'} style={t.status === 'Refunded' ? { textDecoration: 'line-through' } : undefined}>
-                          {money(t.amount)}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        <div className="stack gap-5">
+          <div className="a-panel">
+            <div className="a-panel-head">
+              <h3>Recent payments</h3>
+              <button className="btn btn-outline btn-sm" onClick={() => navigate('/transactions')}>View all</button>
             </div>
-          ) : (
-            <EmptyState small icon="card" title="No payments yet" />
-          )}
-        </div>
-      </div>
-
-      <div className="a-grid-2">
-        <div className="a-panel">
-          <div className="a-panel-head">
-            <h3>Top selling cakes</h3>
+            {summary && summary.recent.length > 0 ? (
+              <div className="a-table-wrap">
+                <table className="tbl tbl-mini">
+                  <thead>
+                    <tr><th>Txn</th><th>Method</th><th>Amount</th></tr>
+                  </thead>
+                  <tbody>
+                    {summary.recent.slice(0, 6).map((t) => (
+                      <tr key={t._id} className={Date.now() - new Date(t.paidAt).getTime() < 5 * 60 * 1000 ? 'row-new' : ''} onClick={() => {
+                        const oid = t.order && typeof t.order === 'object' ? t.order._id : t.order;
+                        navigate(oid ? `/orders/${oid}` : `/transactions?q=${encodeURIComponent(t.txnId)}`);
+                      }}>
+                        <td>
+                          <span className="cell-main">{t.orderCode || t.txnId}</span>
+                          <span className="cell-sub">{fmtTime(t.paidAt)}</span>
+                        </td>
+                        <td>
+                          <span className="row gap-2 center small">
+                            <Icon name={METHOD_ICON[t.method]} className="icon icon-sm" style={{ color: 'var(--c-muted)' }} />
+                            {t.method}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={t.status === 'Refunded' ? 'muted' : 'cell-main'} style={t.status === 'Refunded' ? { textDecoration: 'line-through' } : undefined}>
+                            {money(t.amount)}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <EmptyState small icon="card" title="No payments yet" />
+            )}
           </div>
-          {topSelling.length === 0 ? (
-            <EmptyState small icon="cake" title="No sales yet" />
-          ) : (
-            <div className="a-table-wrap">
-              <table className="tbl tbl-mini">
-                <thead>
-                  <tr><th>Cake</th><th>Sold</th><th>Revenue</th></tr>
-                </thead>
-                <tbody>
-                  {topSelling.map((p) => (
-                    <tr key={p._id} onClick={() => navigate('/cakes')}>
-                      <td>
-                        <span className="cell-main">{p.name}</span>
-                        <span className="cell-sub">{p.cat}</span>
-                      </td>
-                      <td>{p.sold}</td>
-                      <td>{money(p.sold * p.base)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          <div className="a-panel">
+            <div className="a-panel-head">
+              <h3>Recent orders</h3>
+              <button className="btn btn-outline btn-sm" onClick={() => navigate('/orders')}>View all</button>
             </div>
-          )}
-        </div>
-
-        <div className="a-panel">
-          <div className="a-panel-head">
-            <h3>Recent orders</h3>
-            <button className="btn btn-outline btn-sm" onClick={() => navigate('/orders')}>View all</button>
+            {recentOrders.length === 0 ? (
+              <EmptyState small icon="bag" title="No orders yet" />
+            ) : (
+              <div className="a-table-wrap">
+                <table className="tbl tbl-mini">
+                  <thead>
+                    <tr><th>Order</th><th>Customer</th><th>Status</th></tr>
+                  </thead>
+                  <tbody>
+                    {recentOrders.map((o) => (
+                      <tr key={o._id} className={o.status === 'New' ? 'row-new' : ''} onClick={() => navigate(`/orders/${o._id}`)}>
+                        <td>
+                          <span className="cell-main">{o.code}</span>
+                          <span className="cell-sub">{new Date(o.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</span>
+                        </td>
+                        <td>
+                          <span className="cell-main">{o.customer}</span>
+                          <span className="cell-sub">{money(o.amount)}</span>
+                        </td>
+                        <td>
+                          <span className={`badge ${STATUS_TONE[o.status] || 'warn'}`} title={o.status}>{SHORT_STATUS[o.status] || o.status}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
-          {recentOrders.length === 0 ? (
-            <EmptyState small icon="bag" title="No orders yet" />
-          ) : (
-            <div className="a-table-wrap">
-              <table className="tbl tbl-mini">
-                <thead>
-                  <tr><th>Order</th><th>Customer</th><th>Status</th></tr>
-                </thead>
-                <tbody>
-                  {recentOrders.map((o) => (
-                    <tr key={o._id} className={o.status === 'New' ? 'row-new' : ''} onClick={() => navigate('/orders')}>
-                      <td>
-                        <span className="cell-main">{o.code}</span>
-                        <span className="cell-sub">{new Date(o.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</span>
-                      </td>
-                      <td>
-                        <span className="cell-main">{o.customer}</span>
-                        <span className="cell-sub">{money(o.amount)}</span>
-                      </td>
-                      <td>
-                        <span className={`badge ${STATUS_TONE[o.status] || 'warn'}`} title={o.status}>{SHORT_STATUS[o.status] || o.status}</span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          <div className="a-panel">
+            <div className="a-panel-head">
+              <h3>Pending enquiries</h3>
+              <button className="btn btn-outline btn-sm" onClick={() => navigate('/enquiries')}>Manage</button>
             </div>
-          )}
-        </div>
-      </div>
-
-      <div className="a-grid-2">
-        <div className="a-panel">
-          <div className="a-panel-head">
-            <h3>Low stock</h3>
-            <button className="btn btn-outline btn-sm" onClick={() => navigate('/stock')}>Manage</button>
+            {pendingEnquiries.length === 0 ? (
+              <EmptyState small icon="msg" title="No new enquiries" />
+            ) : (
+              <div className="stack gap-3" style={{ padding: 'var(--s-5)' }}>
+                {pendingEnquiries.map((e) => (
+                  <div className="row between center" key={e._id}>
+                    <span className="small">{e.name} · {e.occasion}</span>
+                    <span className="badge neutral">{e.code}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-          {lowStock.length === 0 ? (
-            <EmptyState small icon="check" title="All cakes are well stocked" />
-          ) : (
-            <div className="stack gap-3" style={{ padding: 'var(--s-5)' }}>
-              {lowStock.map((p) => (
-                <div className="row between center" key={p._id}>
-                  <span className="small">{p.name}</span>
-                  <span className={`badge ${p.stock === 'Out of stock' ? 'err' : 'warn'}`}>{p.stock === 'Out of stock' ? 'Out' : `${p.qty} left`}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="a-panel">
-          <div className="a-panel-head">
-            <h3>Pending enquiries</h3>
-            <button className="btn btn-outline btn-sm" onClick={() => navigate('/enquiries')}>Manage</button>
-          </div>
-          {pendingEnquiries.length === 0 ? (
-            <EmptyState small icon="msg" title="No new enquiries" />
-          ) : (
-            <div className="stack gap-3" style={{ padding: 'var(--s-5)' }}>
-              {pendingEnquiries.map((e) => (
-                <div className="row between center" key={e._id}>
-                  <span className="small">{e.name} · {e.occasion}</span>
-                  <span className="badge neutral">{e.code}</span>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       </div>
     </>

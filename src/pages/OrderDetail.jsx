@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import Icon from '../components/common/Icon';
+import Modal from '../components/common/Modal';
 import { orderService } from '../services/orderService';
 import { useUiStore } from '../store/uiStore';
 import { money, fmtDateTime } from '../utils/format';
@@ -16,8 +17,10 @@ export default function OrderDetail() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
 
   const load = () => {
+    setError('');
     orderService
       .get(id)
       .then(setData)
@@ -26,7 +29,14 @@ export default function OrderDetail() {
 
   useEffect(load, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const requestStatus = (status) => {
+    if (!data || status === data.order.status) return;
+    if (status === 'Cancelled') setConfirmCancel(true);
+    else changeStatus(status);
+  };
+
   const changeStatus = async (status) => {
+    setConfirmCancel(false);
     setSaving(true);
     try {
       const order = await orderService.updateStatus(id, status);
@@ -42,8 +52,11 @@ export default function OrderDetail() {
   if (error) {
     return (
       <div className="a-panel a-empty">
-        <p className="muted">{error}</p>
-        <button className="btn btn-outline btn-sm" onClick={() => navigate('/orders')} style={{ marginTop: 12 }}>Back to orders</button>
+        <p className="muted">Could not load this order: {error}</p>
+        <div className="row gap-2" style={{ marginTop: 12 }}>
+          <button className="btn btn-outline btn-sm" onClick={load}>Try again</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => navigate('/orders')}>Back to orders</button>
+        </div>
       </div>
     );
   }
@@ -72,7 +85,7 @@ export default function OrderDetail() {
           </span>
           <span className="stack gap-2" style={{ alignItems: 'flex-end' }}>
             <span className="dv-top-amt">{money(order.amount)}</span>
-            <select className="mini-select" value={order.status} disabled={saving} onChange={(e) => changeStatus(e.target.value)}>
+            <select className="mini-select status-select" value={order.status} disabled={saving} onChange={(e) => requestStatus(e.target.value)} aria-label="Order status">
               {STATUS_OPTS.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </span>
@@ -97,11 +110,20 @@ export default function OrderDetail() {
             <div className="dv-items">
               {order.items.map((it, i) => (
                 <div className="dv-item" key={i}>
-                  <span className="grow small">{it.name} <span className="muted">&times; {it.qty}</span> {it.weight && <span className="muted">({it.weight})</span>}</span>
-                  <b className="small">{money(it.line)}</b>
+                  <span className="grow small">
+                    {it.name} <span className="muted">&times; {it.qty}</span> {it.weight && <span className="muted">({it.weight})</span>}
+                    {it.eggless && <span className="badge success" style={{ marginLeft: 6 }}>Eggless</span>}
+                    {it.note && <span className="dv-item-note">Message on cake: &ldquo;{it.note}&rdquo;</span>}
+                  </span>
+                  <b className="small">{money(it.line ?? (Number(it.unit) || 0) * (Number(it.qty) || 1))}</b>
                 </div>
               ))}
             </div>
+            {order.subtotal != null && <div className="sum-row"><span>Subtotal</span><span>{money(order.subtotal)}</span></div>}
+            {Number(order.discount) > 0 && (
+              <div className="sum-row"><span>Discount{order.promoCode ? ` (${order.promoCode})` : ''}</span><span>&minus;{money(order.discount)}</span></div>
+            )}
+            {order.delivery != null && <div className="sum-row"><span>Delivery</span><span>{Number(order.delivery) > 0 ? money(order.delivery) : 'Free'}</span></div>}
             <div className="sum-row total"><span>Total</span><span>{money(order.amount)}</span></div>
             {order.msg && (
               <div className="dv-field full" style={{ marginTop: 'var(--s-4)' }}>
@@ -142,7 +164,7 @@ export default function OrderDetail() {
           <div className="a-panel-head">
             <h3>Payment</h3>
             {transaction && (
-              <Link className="a-linkbtn" to="/transactions">
+              <Link className="a-linkbtn" to={`/transactions?q=${encodeURIComponent(transaction.txnId || order.code)}`}>
                 {transaction.txnId}
                 <Icon name="aright" className="icon icon-sm" />
               </Link>
@@ -162,13 +184,32 @@ export default function OrderDetail() {
         </div>
       </div>
 
-      <div className="row gap-2" style={{ justifyContent: 'flex-end' }}>
+      <div className="row gap-2 wrap" style={{ justifyContent: 'flex-end' }}>
         {STATUS_OPTS.filter((s) => s !== order.status).map((s) => (
-          <button key={s} className={`badge ${STATUS_TONE[s]} od-quickstatus`} disabled={saving} onClick={() => changeStatus(s)}>
+          <button key={s} className={`badge ${STATUS_TONE[s]} od-quickstatus`} disabled={saving} onClick={() => requestStatus(s)}>
             Mark {s}
           </button>
         ))}
       </div>
+      <Modal
+        open={confirmCancel}
+        onClose={() => setConfirmCancel(false)}
+        kicker="Confirm"
+        title={`Cancel order ${order.code}?`}
+        foot={
+          <>
+            <button className="btn btn-ghost" onClick={() => setConfirmCancel(false)}>Keep order</button>
+            <button className="btn btn-primary" style={{ background: 'var(--c-error)' }} disabled={saving} onClick={() => changeStatus('Cancelled')}>Cancel order</button>
+          </>
+        }
+      >
+        <p className="muted">
+          This marks the order as cancelled. <b>It does not refund the customer.</b>
+          {transaction?.status === 'Paid'
+            ? <> This order was paid online — record the refund from <Link className="a-linkbtn" to={`/transactions?q=${encodeURIComponent(transaction.txnId)}`}>Transactions</Link> and send the money back from your Razorpay dashboard.</>
+            : ' If the customer paid, refund them from your Razorpay dashboard and record it under Transactions.'}
+        </p>
+      </Modal>
     </div>
   );
 }

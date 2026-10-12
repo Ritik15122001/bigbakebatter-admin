@@ -51,9 +51,13 @@ export default function NotificationBell() {
         const newestId = list[0]?._id || null;
         if (!firstLoad.current && newestId && newestId !== lastSeenId.current && !list[0].read) {
           playChime();
-          if (document.hidden && Notification?.permission === 'granted') {
-            const n = new Notification(list[0].title, { body: list[0].message, tag: newestId });
-            n.onclick = () => window.focus();
+          if (document.hidden && window.Notification?.permission === 'granted') {
+            try {
+              const n = new window.Notification(list[0].title, { body: list[0].message, tag: newestId });
+              n.onclick = () => window.focus();
+            } catch {
+              // e.g. Android Chrome only allows notifications via a service worker
+            }
           }
         }
         lastSeenId.current = newestId;
@@ -63,8 +67,12 @@ export default function NotificationBell() {
   };
 
   useEffect(() => {
-    if (window.Notification && Notification.permission === 'default') {
-      Notification.requestPermission().catch(() => {});
+    if (window.Notification?.permission === 'default' && typeof window.Notification.requestPermission === 'function') {
+      try {
+        Promise.resolve(window.Notification.requestPermission()).catch(() => {});
+      } catch {
+        // older Safari: callback-only API or blocked — ignore
+      }
     }
     poll();
     const id = setInterval(poll, POLL_MS);

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '../components/common/Icon';
+import Modal from '../components/common/Modal';
 import EmptyState from '../components/common/EmptyState';
 import Pagination from '../components/common/Pagination';
 import { orderService } from '../services/orderService';
@@ -18,6 +19,8 @@ export default function Orders() {
   const [tab, setTab] = useState('All');
   const [q, setQ] = useState('');
   const [page, setPage] = useState(1);
+  const [cancelling, setCancelling] = useState(null); // order awaiting cancel confirmation
+  const [busyId, setBusyId] = useState(null);
   const PAGE_SIZE = 10;
 
   const load = () => {
@@ -38,17 +41,26 @@ export default function Orders() {
       return true;
     });
   }, [orders, tab, q]);
-  useEffect(() => setPage(1), [tab, q]);
-  const paged = useMemo(() => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [filtered, page]);
+  const safePage = Math.min(page, Math.max(1, Math.ceil(filtered.length / PAGE_SIZE)));
+  const paged = useMemo(() => filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE), [filtered, safePage]);
 
-  const handleStatusChange = async (id, status) => {
+  const applyStatus = async (id, status) => {
+    setBusyId(id);
     try {
-      await orderService.updateStatus(id, status);
-      setOrders((prev) => prev.map((o) => (o._id === id ? { ...o, status } : o)));
+      const updated = await orderService.updateStatus(id, status);
+      setOrders((prev) => prev.map((o) => (o._id === id ? { ...o, ...(updated && updated._id ? updated : { status }) } : o)));
       pushToast({ title: `Order marked ${status}`, kind: 'ok' });
     } catch (e) {
       pushToast({ title: 'Could not update status', subtitle: e.message, kind: 'err' });
+    } finally {
+      setBusyId(null);
     }
+  };
+
+  const handleStatusChange = (order, status) => {
+    if (status === order.status) return;
+    if (status === 'Cancelled') setCancelling(order);
+    else applyStatus(order._id, status);
   };
 
   const openOrder = (id) => navigate(`/orders/${id}`);
@@ -58,14 +70,14 @@ export default function Orders() {
       <div className="a-panel-head">
         <div className="row gap-2 center" style={{ flexWrap: 'wrap' }}>
           {STATUS_TABS.map((t) => (
-            <button key={t} className="mini-select" style={tab === t ? { background: 'var(--c-ink)', color: '#fff' } : undefined} onClick={() => setTab(t)}>
+            <button key={t} className="mini-select" style={tab === t ? { background: 'var(--c-ink)', color: '#fff' } : undefined} onClick={() => { setTab(t); setPage(1); }}>
               {t}
             </button>
           ))}
           {!loading && <span className="a-count">{filtered.length} order{filtered.length === 1 ? '' : 's'}</span>}
         </div>
         <div className="field" style={{ minWidth: 220 }}>
-          <input className="input" placeholder="Search order, customer..." value={q} onChange={(e) => setQ(e.target.value)} />
+          <input className="input" placeholder="Search order, customer..." value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
         </div>
       </div>
 
@@ -94,7 +106,7 @@ export default function Orders() {
                   <td onClick={() => openOrder(o._id)}>{o.items.map((i) => i.name).join(', ')}</td>
                   <td className="num cell-main" onClick={() => openOrder(o._id)}>{money(o.amount)}</td>
                   <td className="tight" onClick={(e) => e.stopPropagation()}>
-                    <select className="mini-select" value={o.status} onChange={(e) => handleStatusChange(o._id, e.target.value)}>
+                    <select className="mini-select status-select" value={o.status} disabled={busyId === o._id} onChange={(e) => handleStatusChange(o, e.target.value)} aria-label={`Status of ${o.code}`}>
                       {STATUS_OPTS.map((s) => (
                         <option key={s} value={s}>{s}</option>
                       ))}
@@ -111,9 +123,33 @@ export default function Orders() {
             </tbody>
           </table>
         </div>
-        <Pagination page={page} pageSize={PAGE_SIZE} total={filtered.length} onPage={setPage} />
+        <Pagination page={safePage} pageSize={PAGE_SIZE} total={filtered.length} onPage={setPage} />
         </>
       )}
+
+      <Modal
+        open={!!cancelling}
+        onClose={() => setCancelling(null)}
+        kicker="Confirm"
+        title={cancelling ? `Cancel order ${cancelling.code}?` : ''}
+        foot={
+          <>
+            <button className="btn btn-ghost" onClick={() => setCancelling(null)}>Keep order</button>
+            <button
+              className="btn btn-primary"
+              style={{ background: 'var(--c-error)' }}
+              onClick={() => { const o = cancelling; setCancelling(null); applyStatus(o._id, 'Cancelled'); }}
+            >
+              Cancel order
+            </button>
+          </>
+        }
+      >
+        <p className="muted">
+          This marks the order as cancelled. <b>It does not refund the customer.</b> If they paid online, record the refund from
+          {' '}<b>Transactions</b> and send the money back from your Razorpay dashboard.
+        </p>
+      </Modal>
     </div>
   );
 }

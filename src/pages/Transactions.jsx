@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import Icon from '../components/common/Icon';
 import Modal from '../components/common/Modal';
 import EmptyState from '../components/common/EmptyState';
@@ -15,6 +15,12 @@ const STATUS_TONE = { Paid: 'success', Refunded: 'warn', Failed: 'err' };
 const STATUS_ICON = { Paid: 'check', Refunded: 'refresh', Failed: 'alert' };
 const METHOD_ICON = { UPI: 'phone', Card: 'card', 'Net Banking': 'home' };
 
+/** Link to the order's detail page when we know its id, else the orders list. */
+const orderHref = (t) => {
+  const id = t.order && typeof t.order === 'object' ? t.order._id : t.order;
+  return id ? `/orders/${id}` : '/orders';
+};
+
 export default function Transactions() {
   const pushToast = useUiStore((s) => s.pushToast);
   const [summary, setSummary] = useState(null);
@@ -24,7 +30,8 @@ export default function Transactions() {
   const [viewing, setViewing] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  const [q, setQ] = useState('');
+  const [params] = useSearchParams();
+  const [q, setQ] = useState(() => params.get('q') || '');
   const [status, setStatus] = useState('All');
   const [method, setMethod] = useState('All');
   const [from, setFrom] = useState('');
@@ -38,6 +45,7 @@ export default function Transactions() {
 
   const load = () => {
     setLoading(true);
+    setPage(1);
     transactionService
       .list({ q, status, method, from, to })
       .then(setList)
@@ -51,8 +59,8 @@ export default function Transactions() {
     return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
-  useEffect(() => setPage(1), [q, status, method, from, to]);
-  const paged = useMemo(() => (list || []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [list, page]);
+  const safePage = Math.min(page, Math.max(1, Math.ceil((list || []).length / PAGE_SIZE)));
+  const paged = useMemo(() => (list || []).slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE), [list, safePage]);
 
   const clearFilters = () => {
     setQ(''); setStatus('All'); setMethod('All'); setFrom(''); setTo('');
@@ -69,7 +77,7 @@ export default function Transactions() {
     setBusy(true);
     try {
       await transactionService.refund(refunding._id);
-      pushToast({ title: `${refunding.txnId} refunded`, subtitle: 'The linked order has been cancelled.', kind: 'ok' });
+      pushToast({ title: `${refunding.txnId} marked as refunded`, subtitle: 'The order was cancelled. Remember to send the money back from your Razorpay dashboard.', kind: 'ok' });
       setRefunding(null);
       load();
       transactionService.summary().then(setSummary).catch(() => {});
@@ -179,7 +187,10 @@ export default function Transactions() {
 
       <div className="a-panel">
         <div className="a-panel-head">
-          <h3>All transactions</h3>
+          <div className="stack gap-1">
+            <h3>All transactions</h3>
+            <span className="tiny muted">&ldquo;Refund&rdquo; here only updates your records — the money itself is returned from the Razorpay dashboard.</span>
+          </div>
           <span className="a-count">{list ? `${list.length} shown` : ''}</span>
         </div>
 
@@ -249,7 +260,7 @@ export default function Transactions() {
                       <td><span className="cell-main" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.8em' }}>{t.txnId}</span></td>
                       <td>
                         {t.orderCode ? (
-                          <Link className="a-linkbtn" to="/orders" onClick={(e) => e.stopPropagation()}>{t.orderCode}</Link>
+                          <Link className="a-linkbtn" to={orderHref(t)} onClick={(e) => e.stopPropagation()}>{t.orderCode}</Link>
                         ) : <span className="cell-sub">—</span>}
                       </td>
                       <td>
@@ -278,7 +289,7 @@ export default function Transactions() {
                           <Icon name="eye" className="icon icon-sm" />
                         </button>
                         {t.status === 'Paid' && (
-                          <button className="iconbtn" title="Refund this transaction" aria-label="Refund" onClick={() => setRefunding(t)}>
+                          <button className="iconbtn" title="Mark as refunded" aria-label="Mark as refunded" onClick={() => setRefunding(t)}>
                             <Icon name="refresh" className="icon icon-sm" />
                           </button>
                         )}
@@ -292,7 +303,7 @@ export default function Transactions() {
               <span>Showing <b>{list.length}</b> transaction{list.length === 1 ? '' : 's'}</span>
               <span className="rtotal">Total shown: <b>{money(shownTotal)}</b></span>
             </div>
-            <Pagination page={page} pageSize={PAGE_SIZE} total={list.length} onPage={setPage} />
+            <Pagination page={safePage} pageSize={PAGE_SIZE} total={list.length} onPage={setPage} />
           </>
         )}
       </div>
@@ -306,16 +317,23 @@ export default function Transactions() {
           <>
             <button className="btn btn-ghost" onClick={() => setRefunding(null)}>Cancel</button>
             <button className="btn btn-primary" style={{ background: 'var(--c-error)' }} disabled={busy} onClick={confirmRefund}>
-              {busy ? 'Refunding…' : 'Refund & cancel order'}
+              {busy ? 'Saving…' : 'Mark refunded & cancel order'}
             </button>
           </>
         }
       >
         {refunding && (
-          <p className="lede">
-            This marks the {money(refunding.amount)} payment for order <b>{refunding.orderCode}</b> ({refunding.customer}) as refunded
-            and cancels the order. This cannot be undone from here.
-          </p>
+          <div className="stack gap-3">
+            <p className="lede">
+              This records the {money(refunding.amount)} payment for order <b>{refunding.orderCode}</b> ({refunding.customer}) as refunded
+              and cancels the order. This cannot be undone from here.
+            </p>
+            <p className="a-note">
+              <Icon name="alert" className="icon icon-sm" />
+              <span><b>No money is sent from here.</b> Issue the actual refund in your Razorpay dashboard (Payments → find payment
+              {refunding.razorpayPaymentId ? <> <span className="dv-mono">{refunding.razorpayPaymentId}</span></> : ''} → Refund).</span>
+            </p>
+          </div>
         )}
       </Modal>
 
@@ -333,7 +351,7 @@ export default function Transactions() {
               onClick={() => { setRefunding(viewing); setViewing(null); }}
             >
               <Icon name="refresh" className="icon icon-sm" />
-              Refund this payment
+              Mark as refunded
             </button>
           )
         }
@@ -362,7 +380,7 @@ export default function Transactions() {
                 <div className="dv-field">
                   <label>Order</label>
                   <div className="v">
-                    {viewing.orderCode ? <Link className="a-linkbtn" to="/orders" onClick={() => setViewing(null)}>{viewing.orderCode}</Link> : '—'}
+                    {viewing.orderCode ? <Link className="a-linkbtn" to={orderHref(viewing)} onClick={() => setViewing(null)}>{viewing.orderCode}</Link> : '—'}
                   </div>
                 </div>
                 <div className="dv-field"><label>Method</label><div className="v">{viewing.method}</div></div>

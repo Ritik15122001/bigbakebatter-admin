@@ -1,16 +1,14 @@
 import ResourceManager from '../components/common/ResourceManager';
-import Icon from '../components/common/Icon';
+import { IconPreview } from '../components/common/IconPicker';
 import { announcementService } from '../services/catalogService';
+import { BAR_ICONS } from '../utils/icons';
 
-export const BAR_ICONS = ['sparkles', 'percent', 'truck', 'gift', 'star', 'heart', 'clock', 'phone', 'cake', 'party', 'leaf'];
+const validLink = (v) => !v || v.startsWith('/') || /^https?:\/\//i.test(v);
 
 const FIELDS = [
-  { key: 'text', label: 'Message', required: true, span2: true, placeholder: 'e.g. FIRST20 — 20% off your first order' },
-  {
-    key: 'icon', label: 'Icon', type: 'select',
-    options: [{ value: 'veg', label: 'Pure-veg mark' }, ...BAR_ICONS.map((i) => ({ value: i, label: i }))],
-  },
-  { key: 'link', label: 'Link (optional)', placeholder: '/shop' },
+  { key: 'text', label: 'Message', required: true, span2: true, placeholder: 'e.g. FIRST20 — 20% off your first order', hint: 'Up to 160 characters.' },
+  { key: 'icon', label: 'Icon', type: 'icon', options: BAR_ICONS, allowVeg: true },
+  { key: 'link', label: 'Link (optional)', placeholder: '/shop or https://…', hint: 'Where the message goes when tapped.' },
   { key: 'order', label: 'Position', type: 'number', hint: 'Lower numbers show first.' },
   { key: 'active', label: 'Show on storefront', type: 'bool', checkLabel: 'Active' },
 ];
@@ -18,7 +16,7 @@ const FIELDS = [
 const COLUMNS = [
   { label: 'Message', render: (a) => (
     <span className="row gap-2 center">
-      {a.icon !== 'veg' && <Icon name={a.icon} className="icon icon-sm" />}
+      <IconPreview name={a.icon} />
       <span className="cell-main">{a.text}</span>
     </span>
   ) },
@@ -27,6 +25,14 @@ const COLUMNS = [
   { label: 'Status', render: (a) => <span className={`badge ${a.active ? 'success' : 'neutral'}`}>{a.active ? 'Active' : 'Hidden'}</span> },
 ];
 
+const sortByOrder = (a, b) => a.order - b.order;
+
+const validate = (p) => {
+  if (p.text.length > 160) return 'Message must be 160 characters or fewer';
+  if (!validLink(p.link)) return 'Link must start with / or https://';
+  return null;
+};
+
 export default function Announcements() {
   return (
     <ResourceManager
@@ -34,8 +40,10 @@ export default function Announcements() {
       service={announcementService}
       fields={FIELDS}
       columns={COLUMNS}
-      newItem={{ icon: 'sparkles', active: true }}
-      sortBy={(a, b) => a.order - b.order}
+      newItem={{ icon: 'sparkles', active: true, order: 0 }}
+      sortBy={sortByOrder}
+      validate={validate}
+      intro="The thin rotating bar at the very top of every storefront page. Hidden entries stay saved but are not shown."
       empty="No announcements. The top bar on the storefront stays hidden until you add one."
     />
   );

@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import ProtectedRoute from './components/common/ProtectedRoute';
 import ToastStack from './components/common/ToastStack';
 import Login from './pages/Login';
@@ -17,6 +17,9 @@ import Banners from './pages/Banners';
 import Announcements from './pages/Announcements';
 import SiteContent from './pages/SiteContent';
 import Settings from './pages/Settings';
+import ContentPages from './pages/ContentPages';
+import Coupons from './pages/Coupons';
+import FestivalTheme from './pages/FestivalTheme';
 import { useAuthStore } from './store/authStore';
 
 export default function App() {
@@ -50,7 +53,12 @@ export default function App() {
           <Route path="banners" element={<Banners />} />
           <Route path="announcements" element={<Announcements />} />
           <Route path="content" element={<SiteContent />} />
+          <Route path="website-content" element={<ContentPages />} />
+          <Route path="content-pages" element={<Navigate to="/website-content" replace />} />
+          <Route path="coupons" element={<Coupons />} />
+          <Route path="festival" element={<FestivalTheme />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
       <ToastStack />

@@ -4,7 +4,8 @@ import Modal from '../components/common/Modal';
 import EmptyState from '../components/common/EmptyState';
 import Pagination from '../components/common/Pagination';
 import { blogService } from '../services/blogService';
-import { uploadService } from '../services/uploadService';
+import ImageField from '../components/common/ImageField';
+import { resolveImg } from '../utils/media';
 import { useUiStore } from '../store/uiStore';
 
 const EMPTY = { title: '', cat: 'Guides', excerpt: '', body: '', status: 'Draft', img: '' };
@@ -19,6 +20,8 @@ export default function BlogAdmin() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY);
   const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [deleting, setDeleting] = useState(null);
 
   const load = () => {
@@ -32,8 +35,8 @@ export default function BlogAdmin() {
     () => list.filter((b) => `${b.title} ${b.cat}`.toLowerCase().includes(q.toLowerCase())),
     [list, q]
   );
-  useEffect(() => setPage(1), [q]);
-  const paged = useMemo(() => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [filtered, page]);
+  const safePage = Math.min(page, Math.max(1, Math.ceil(filtered.length / PAGE_SIZE)));
+  const paged = useMemo(() => filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE), [filtered, safePage]);
 
   const togglePublish = async (post) => {
     const status = post.status === 'Published' ? 'Draft' : 'Published';
@@ -54,26 +57,14 @@ export default function BlogAdmin() {
     setForm({ title: b.title, cat: b.cat, excerpt: b.excerpt, body: b.body || '', status: b.status, img: b.img || '' });
   };
 
-  const handleFile = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    try {
-      const url = await uploadService.upload(file);
-      setForm((f) => ({ ...f, img: url }));
-    } catch (err) {
-      pushToast({ title: 'Upload failed', subtitle: err.message, kind: 'err' });
-    } finally {
-      setUploading(false);
-    }
-  };
-
   const save = async (e) => {
-    e.preventDefault();
+    e?.preventDefault();
+    if (saving || uploading) return;
     if (!form.title.trim()) {
       pushToast({ title: 'Enter a title', kind: 'err' });
       return;
     }
+    setSaving(true);
     try {
       if (editing === 'new') {
         await blogService.create(form);
@@ -86,10 +77,13 @@ export default function BlogAdmin() {
       load();
     } catch (err) {
       pushToast({ title: 'Save failed', subtitle: err.message, kind: 'err' });
+    } finally {
+      setSaving(false);
     }
   };
 
   const confirmDelete = async () => {
+    setRemoving(true);
     try {
       await blogService.remove(deleting._id);
       pushToast({ title: 'Article deleted', kind: 'info' });
@@ -97,6 +91,8 @@ export default function BlogAdmin() {
       load();
     } catch (err) {
       pushToast({ title: 'Delete failed', subtitle: err.message, kind: 'err' });
+    } finally {
+      setRemoving(false);
     }
   };
 
@@ -109,7 +105,7 @@ export default function BlogAdmin() {
         </div>
         <div className="row gap-3 center">
           <div className="field" style={{ minWidth: 220 }}>
-            <input className="input" placeholder="Search articles..." value={q} onChange={(e) => setQ(e.target.value)} />
+            <input className="input" placeholder="Search articles..." value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
           </div>
           <button className="btn btn-primary btn-sm" onClick={openAdd}>
             <Icon name="plus" className="icon icon-sm" />
@@ -127,15 +123,15 @@ export default function BlogAdmin() {
         <div className="a-table-wrap">
           <table className="tbl">
             <thead>
-              <tr><th>Article</th><th>Category</th><th>Date</th><th>Views</th><th>Status</th><th /></tr>
+              <tr><th>Article</th><th>Category</th><th>Date</th><th>Views</th><th className="tight">Status</th><th className="act" /></tr>
             </thead>
             <tbody>
               {paged.map((b) => (
-                <tr key={b._id}>
+                <tr key={b._id} onClick={() => openEdit(b)}>
                   <td>
                     <span className="row gap-3 center">
                       <span style={{ width: 40, height: 40, borderRadius: 8, overflow: 'hidden', flex: 'none', background: 'var(--c-bg-warm)' }}>
-                        {b.img && <img src={b.img} alt={b.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+                        {b.img && <img src={resolveImg(b.img)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
                       </span>
                       <span className="cell-main">{b.title}</span>
                     </span>
@@ -143,17 +139,17 @@ export default function BlogAdmin() {
                   <td>{b.cat}</td>
                   <td>{new Date(b.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
                   <td>{(b.views || 0).toLocaleString('en-IN')}</td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <button className={`badge ${b.status === 'Published' ? 'success' : 'neutral'}`} onClick={() => togglePublish(b)} style={{ cursor: 'pointer' }}>
+                  <td className="tight" onClick={(e) => e.stopPropagation()}>
+                    <button title="Click to toggle Draft / Published" className={`badge ${b.status === 'Published' ? 'success' : 'neutral'}`} onClick={() => togglePublish(b)} style={{ cursor: 'pointer' }}>
                       {b.status}
                     </button>
                   </td>
-                  <td className="rowact">
+                  <td className="act rowact" onClick={(e) => e.stopPropagation()}>
                     <button className="iconbtn" aria-label="Edit" onClick={() => openEdit(b)}>
                       <Icon name="edit" className="icon icon-sm" />
                     </button>
                     <button className="iconbtn danger" aria-label="Delete" onClick={() => setDeleting(b)}>
-                      <Icon name="x" className="icon icon-sm" />
+                      <Icon name="trash" className="icon icon-sm" />
                     </button>
                   </td>
                 </tr>
@@ -161,29 +157,21 @@ export default function BlogAdmin() {
             </tbody>
           </table>
         </div>
-        <Pagination page={page} pageSize={PAGE_SIZE} total={filtered.length} onPage={setPage} />
+        <Pagination page={safePage} pageSize={PAGE_SIZE} total={filtered.length} onPage={setPage} />
         </>
       )}
 
       <Modal
         open={!!editing}
-        onClose={() => setEditing(null)}
+        onClose={() => !saving && !uploading && setEditing(null)}
         kicker={editing === 'new' ? 'New article' : 'Edit article'}
         title={editing === 'new' ? 'Write a new article' : form.title}
-        foot={<button className="btn btn-primary btn-block" onClick={save}>Save article</button>}
+        foot={<button className="btn btn-primary btn-block" onClick={save} disabled={saving || uploading}>{saving ? 'Saving…' : uploading ? 'Uploading photo…' : 'Save article'}</button>}
       >
         <form className="stack gap-4" onSubmit={save}>
           <div className="field">
             <label>Cover photo</label>
-            <label className="dropzone" style={{ display: 'block', padding: 16 }}>
-              {uploading ? 'Uploading…' : form.img ? 'Change photo' : 'Click to upload a cover photo'}
-              <input type="file" accept="image/*" className="sr-only" onChange={handleFile} />
-            </label>
-            {form.img && (
-              <span style={{ display: 'block', width: 120, height: 68, borderRadius: 8, overflow: 'hidden', marginTop: 8 }}>
-                <img src={form.img} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              </span>
-            )}
+            <ImageField value={form.img} onChange={(img) => setForm((f) => ({ ...f, img }))} onUploadingChange={setUploading} previewWidth={160} previewHeight={90} />
           </div>
           <div className="field">
             <label>Title</label>
@@ -221,7 +209,7 @@ export default function BlogAdmin() {
         foot={
           <>
             <button className="btn btn-ghost" onClick={() => setDeleting(null)}>Cancel</button>
-            <button className="btn btn-primary" style={{ background: 'var(--c-error)' }} onClick={confirmDelete}>Delete</button>
+            <button className="btn btn-primary" style={{ background: 'var(--c-error)' }} onClick={confirmDelete} disabled={removing}>{removing ? 'Deleting…' : 'Delete'}</button>
           </>
         }
       >
