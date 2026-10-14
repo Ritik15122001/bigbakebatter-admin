@@ -1,0 +1,81 @@
+/* Kit extension for the sales pages (Orders, Payments, Customers, Enquiries). All classes `sales-*`. */
+
+.sales-contact { flex-wrap: wrap; gap: 8px; }
+
+.sales-copy { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; }
+.sales-copy .u-mono { overflow-wrap: anywhere; font-size: 13px; }
+.sales-copy .u-iconbtn { width: 28px; height: 28px; flex: none; }
+
+/* Order stepper */
+.sales-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; }
+.sales-steps li { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; min-width: 0; }
+.sales-steps li + li::before { content: ''; position: absolute; top: 15px; right: 50%; width: 100%; height: 2px; background: var(--u-line); z-index: 0; }
+.sales-steps li.done + li::before, .sales-steps li.done + li.on::before { background: var(--u-brand); }
+.sales-step-dot { position: relative; z-index: 1; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--u-panel); border: 2px solid var(--u-line); color: var(--u-faint); }
+.sales-step-dot .icon { width: 15px; height: 15px; }
+.sales-steps li.done .sales-step-dot { background: var(--u-brand); border-color: var(--u-brand); color: #fff; }
+.sales-steps li.on .sales-step-dot { border-color: var(--u-brand); color: var(--u-brand-2); box-shadow: var(--u-ring); }
+.sales-step-label { font-size: 12px; font-weight: 600; color: var(--u-muted); line-height: 1.25; }
+.sales-steps li.on .sales-step-label, .sales-steps li.done .sales-step-label { color: var(--u-ink); }
+.sales-steps.cancelled { opacity: 0.45; }
+
+/* Order items */
+.sales-item { display: flex; gap: 14px; align-items: flex-start; padding: 14px 20px; border-top: 1px solid #f0f1f4; }
+.sales-item:first-child { border-top: 0; }
+.sales-item-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.sales-item-body > b { color: var(--u-ink); font-weight: 600; }
+.sales-item-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sales-item-note { display: flex; gap: 6px; align-items: flex-start; font-size: 13px; color: var(--u-text); background: var(--u-amber-soft); border: 1px solid var(--u-amber-line); border-radius: var(--u-r-sm); padding: 6px 10px; margin-top: 4px; }
+.sales-item-note .icon { width: 14px; height: 14px; margin-top: 2px; color: var(--u-amber); flex: none; }
+.sales-item-price { text-align: right; flex: none; display: flex; flex-direction: column; gap: 2px; }
+.sales-item-price b { color: var(--u-ink); font-weight: 600; }
+.sales-summary { padding: 6px 20px 14px; border-top: 1px solid var(--u-line); background: var(--u-subtle); border-radius: 0 0 var(--u-r-lg) var(--u-r-lg); }
+.sales-summary .u-kv > dt, .sales-summary .u-kv > dd { padding: 7px 0; border-bottom: 0; }
+.sales-summary .sales-total { font-size: 16px; font-weight: 700; color: var(--u-ink); }
+.sales-summary .u-kv > dt.sales-total-k { color: var(--u-ink); font-weight: 600; border-top: 1px solid var(--u-line); }
+.sales-summary .u-kv > dd.sales-total-v { border-top: 1px solid var(--u-line); }
+
+/* Message callout (cake message / brief) */
+.sales-quote { background: var(--u-subtle); border: 1px solid var(--u-line); border-left: 3px solid var(--u-brand); border-radius: var(--u-r-sm); padding: 10px 12px; color: var(--u-ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Person header (customer card / customer detail) */
+.sales-person { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.sales-person-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sales-person-text b { font-size: 16px; color: var(--u-ink); font-weight: 600; }
+.sales-person-text span { color: var(--u-muted); font-size: 13.5px; overflow-wrap: anywhere; }
+.sales-title-avatar { display: inline-flex; align-items: center; gap: 14px; }
+.sales-meta-line { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--u-muted); font-size: 14px; margin-top: 4px; }
+.sales-meta-line span { display: inline-flex; align-items: center; gap: 6px; overflow-wrap: anywhere; }
+.sales-meta-line .icon { width: 15px; height: 15px; color: var(--u-faint); }
+
+.sales-company { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--u-r); background: var(--u-violet-soft); border: 1px solid var(--u-violet-line); }
+.sales-company .icon { width: 20px; height: 20px; color: var(--u-violet); }
+.sales-company small { display: block; font-size: 12px; color: var(--u-muted); }
+.sales-company b { color: var(--u-ink); font-size: 15px; }
+
+.sales-date-range { display: flex; align-items: center; gap: 6px; }
+.sales-date-range .u-input { min-height: 36px; padding-top: 6px; padding-bottom: 6px; width: 148px; font-size: 13.5px; }
+.sales-date-range span { color: var(--u-faint); font-size: 13px; }
+
+.sales-addr { display: flex; gap: 12px; align-items: flex-start; padding: 14px 20px; border-top: 1px solid #f0f1f4; }
+.sales-addr:first-child { border-top: 0; }
+.sales-addr > .icon { width: 18px; height: 18px; color: var(--u-faint); margin-top: 2px; flex: none; }
+
+.sales-tabs-card .u-tabs { padding: 0 12px; }
+
+/* Printable kitchen slip: hidden on screen, the only thing printed on the order page */
+.sales-slip { display: none; }
+@media print {
+  .sales-screen { display: none !important; }
+  .sales-slip { display: block; color: #000; font-family: var(--u-font); font-size: 12pt; line-height: 1.45; }
+  .sales-slip h1 { font-size: 20pt; margin: 0 0 2pt; }
+  .sales-slip h2 { font-size: 12pt; margin: 14pt 0 4pt; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1.5pt solid #000; padding-bottom: 2pt; }
+  .sales-slip table { width: 100%; border-collapse: collapse; }
+  .sales-slip th, .sales-slip td { text-align: left; padding: 5pt 4pt; border-bottom: 0.75pt solid #999; vertical-align: top; }
+  .sales-slip .slip-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12pt; }
+  .sales-slip .slip-msg { font-size: 16pt; font-weight: 700; border: 1.5pt dashed #000; padding: 8pt 10pt; margin-top: 4pt; }
+  .sales-slip .slip-qty { font-size: 14pt; font-weight: 700; }
+  .sales-slip .slip-tag { display: inline-block; border: 1pt solid #000; padding: 0 4pt; font-size: 9pt; font-weight: 700; margin-left: 4pt; }
+  @page { margin: 12mm; }
+}
+.u-table th.sortable .icon { display: inline-block; }

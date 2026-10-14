@@ -50,8 +50,8 @@ export default function Login() {
             </span>
           </span>
           <span>
-            <b className="brand-name" style={{ color: '#fff' }}>BIGBAKEBATTER</b>
-            <span className="brand-tag" style={{ display: 'block' }}>Admin console</span>
+            <b className="brand-name" style={{ color: '#fff' }}>BigBakeBatter</b>
+            <span style={{ display: 'block', fontSize: 12, color: 'rgba(255,255,255,0.7)', fontWeight: 500 }}>Admin console</span>
           </span>
         </div>
         <div className="admin-auth-side-mid">

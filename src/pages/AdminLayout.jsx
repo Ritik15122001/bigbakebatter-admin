@@ -1,179 +1,153 @@
 import { useEffect, useState } from 'react';
-import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Icon from '../components/common/Icon';
 import NotificationBell from '../components/common/NotificationBell';
+import { Avatar, CommandPalette, IconButton, Menu } from '../ui';
+import { NAV, NAV_GROUPS, isActivePath } from '../nav';
 import { orderService } from '../services/orderService';
 import { enquiryService } from '../services/enquiryService';
 import { useAuthStore } from '../store/authStore';
 
-/**
- * Sidebar sections. Routes are unchanged from earlier builds (/content is the
- * catalogue-extras manager) so old bookmarks keep working.
- */
-const NAV_GROUPS = [
-  {
-    label: 'Shop',
-    items: [
-      { to: '/', label: 'Dashboard', icon: 'home' },
-      { to: '/orders', label: 'Orders', icon: 'bag' },
-      { to: '/transactions', label: 'Transactions', icon: 'card' },
-      { to: '/customers', label: 'Customers', icon: 'user' },
-      { to: '/enquiries', label: 'Enquiries', icon: 'msg' },
-    ],
-  },
-  {
-    label: 'Catalogue',
-    items: [
-      { to: '/cakes', label: 'Cakes', icon: 'cake' },
-      { to: '/stock', label: 'Categories & Stock', icon: 'pkg' },
-      { to: '/content', label: 'Catalogue extras', icon: 'star', title: 'Flavours, occasions, add-ons, FAQs, reviews' },
-      { to: '/coupons', label: 'Coupons', icon: 'percent' },
-    ],
-  },
-  {
-    label: 'Website',
-    items: [
-      { to: '/website-content', label: 'Website content', icon: 'edit', title: 'Page text, pictures and links' },
-      { to: '/banners', label: 'Homepage banners', icon: 'gift' },
-      { to: '/announcements', label: 'Announcements', icon: 'sparkles' },
-      { to: '/festival', label: 'Festive theme', icon: 'flame', title: 'Diwali and other festival themes' },
-      { to: '/blog', label: 'Blog', icon: 'news' },
-      { to: '/settings', label: 'Settings', icon: 'info' },
-    ],
-  },
-];
-const NAV = NAV_GROUPS.flatMap((g) => g.items);
-
 const STOREFRONT_URL = import.meta.env.VITE_STOREFRONT_URL || 'http://localhost:5301';
 const BADGE_POLL_MS = 60000;
+const COLLAPSE_KEY = 'bbb_admin_sidebar_collapsed';
+
+function readCollapsed() {
+  try { return localStorage.getItem(COLLAPSE_KEY) === '1'; } catch { return false; }
+}
 
 export default function AdminLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
-  const [newOrders, setNewOrders] = useState(0);
-  const [newEnquiries, setNewEnquiries] = useState(0);
-  const [now, setNow] = useState(() => new Date());
+  const [counts, setCounts] = useState({ orders: 0, enquiries: 0 });
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [cmdOpen, setCmdOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
 
-  // Sidebar badge counts: once on mount, then every minute (and when the tab
-  // becomes visible again) — not on every route change.
+  // Sidebar counts: on mount, every minute, and when the tab becomes visible.
   useEffect(() => {
     const refresh = () => {
-      orderService.list('New').then((orders) => setNewOrders(orders.filter((o) => o.status === 'New').length)).catch(() => {});
-      enquiryService.list().then((list) => setNewEnquiries(list.filter((e) => e.status === 'New').length)).catch(() => {});
+      orderService.list('New').then((o) => setCounts((c) => ({ ...c, orders: o.filter((x) => x.status === 'New').length }))).catch(() => {});
+      enquiryService.list().then((l) => setCounts((c) => ({ ...c, enquiries: l.filter((e) => e.status === 'New').length }))).catch(() => {});
     };
     refresh();
-    const id = setInterval(() => { if (!document.hidden) refresh(); }, BADGE_POLL_MS);
-    const onVisible = () => { if (!document.hidden) refresh(); };
+    const id = setInterval(() => !document.hidden && refresh(), BADGE_POLL_MS);
+    const onVisible = () => !document.hidden && refresh();
     document.addEventListener('visibilitychange', onVisible);
-    return () => {
-      clearInterval(id);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVisible); };
   }, []);
 
   useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 30000);
-    return () => clearInterval(id);
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setCmdOpen((o) => !o); }
+    };
+    const onScroll = () => setScrolled(window.scrollY > 4);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('scroll', onScroll); };
   }, []);
 
-  const badgeFor = (to) => {
-    if (to === '/orders' && newOrders > 0) return newOrders;
-    if (to === '/enquiries' && newEnquiries > 0) return newEnquiries;
-    return null;
+  useEffect(() => { setMobileOpen(false); window.scrollTo(0, 0); }, [location.pathname]);
+
+  const toggleCollapsed = () => {
+    setCollapsed((c) => {
+      try { localStorage.setItem(COLLAPSE_KEY, c ? '0' : '1'); } catch { /* storage unavailable */ }
+      return !c;
+    });
   };
 
-  const isActive = (to) => (to === '/' ? location.pathname === '/' : location.pathname === to || location.pathname.startsWith(`${to}/`));
-  const current = NAV.find((n) => isActive(n.to));
+  const current = NAV.find((n) => isActivePath(location.pathname, n.to));
+  const signOut = () => { logout(); navigate('/login', { replace: true }); };
 
-  const handleSignOut = () => {
-    logout();
-    navigate('/login', { replace: true });
-  };
+  const commands = [
+    ...NAV.map((n) => ({ group: 'Go to', label: n.label, icon: n.icon, keywords: n.keywords, onSelect: () => navigate(n.to) })),
+    { group: 'Create', label: 'New cake', icon: 'plus', keywords: 'add product', onSelect: () => navigate('/cakes/new') },
+    { group: 'Create', label: 'New blog post', icon: 'plus', keywords: 'article', onSelect: () => navigate('/blog/new') },
+    { group: 'Create', label: 'New coupon', icon: 'plus', keywords: 'discount', onSelect: () => navigate('/coupons?new=1') },
+    { group: 'Other', label: 'Open storefront', icon: 'external', onSelect: () => window.open(STOREFRONT_URL, '_blank', 'noopener') },
+    { group: 'Other', label: 'Sign out', icon: 'logout', onSelect: signOut },
+  ];
 
-  const initial = (user?.name || 'A')[0].toUpperCase();
+  const profileMenu = [
+    { heading: user?.email },
+    { label: 'Team & account', icon: 'shield', onClick: () => navigate('/team') },
+    { label: 'Store settings', icon: 'settings', onClick: () => navigate('/settings') },
+    { label: 'Open storefront', icon: 'external', href: STOREFRONT_URL, external: true },
+    { divider: true },
+    { label: 'Sign out', icon: 'logout', danger: true, onClick: signOut },
+  ];
 
   return (
-    <div className="admin">
-      <aside className="a-side">
-        <Link className="a-brand" to="/">
-          <span className="brand-mark">
-            <img src="/brand/logo-icon.png" alt="" />
-          </span>
-          <span className="brand-name">BigBakeBatter Admin</span>
-        </Link>
-        <nav className="a-nav">
+    <div className={`u-app u-shell ${collapsed ? 'collapsed' : ''}`}>
+      {mobileOpen && <div className="u-scrim" onClick={() => setMobileOpen(false)} />}
+      <aside className={`u-sidebar ${mobileOpen ? 'open' : ''}`} aria-label="Main navigation">
+        <div className="u-side-top">
+          <span className="u-logo"><img src="/brand/logo-icon.png" alt="" /></span>
+          <span className="u-side-name"><b>BigBakeBatter</b><span>Admin console</span></span>
+          <IconButton className="u-side-collapse" icon="sidebar" label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={toggleCollapsed} />
+        </div>
+        <button className="u-side-search" onClick={() => setCmdOpen(true)} title="Search (⌘K)">
+          <Icon name="search" />
+          <span>Search…</span>
+          <kbd>⌘K</kbd>
+        </button>
+        <nav className="u-nav">
           {NAV_GROUPS.map((g) => (
-            <div key={g.label} className="a-nav-group">
-              <p className="a-nav-sep">{g.label}</p>
+            <div className="u-nav-group" key={g.label}>
+              <div className="u-nav-label">{g.label}</div>
               {g.items.map((n) => {
-                const badge = badgeFor(n.to);
+                const on = isActivePath(location.pathname, n.to);
+                const count = n.badge ? counts[n.badge] : 0;
                 return (
-                  <button key={n.to} className={isActive(n.to) ? 'on' : ''} title={n.title} onClick={() => navigate(n.to)}>
-                    <Icon name={n.icon} className="icon icon-sm" />
-                    {n.label}
-                    {badge && <span className="badge-n">{badge}</span>}
+                  <button key={n.to} className={`u-nav-item ${on ? 'on' : ''}`} onClick={() => navigate(n.to)} title={collapsed ? n.label : undefined} aria-current={on ? 'page' : undefined}>
+                    <Icon name={n.icon} />
+                    <span className="u-nav-text">{n.label}</span>
+                    {count > 0 && <span className="u-nav-count">{count}</span>}
                   </button>
                 );
               })}
             </div>
           ))}
         </nav>
-        <div className="a-side-foot">
-          <a className="a-side-user" href={STOREFRONT_URL} target="_blank" rel="noreferrer" title="Open storefront">
-            <span className="av">{initial}</span>
-            <span className="who">
-              <b>{user?.name || 'Admin'}</b>
-              <span>{user?.role || 'admin'}</span>
-            </span>
-            <Icon name="external" className="icon icon-sm" style={{ marginLeft: 'auto', flex: 'none', color: '#8c7767' }} />
-          </a>
-          <button className="a-signout" onClick={handleSignOut}>
-            <Icon name="logout" className="icon icon-sm" />
-            Sign out
-          </button>
+        <div className="u-side-foot">
+          <Menu
+            up
+            align="left"
+            items={profileMenu}
+            trigger={({ toggle }) => (
+              <button className="u-profile" onClick={toggle}>
+                <Avatar name={user?.name || 'Admin'} />
+                <span className="u-profile-text"><b>{user?.name || 'Admin'}</b><span>{user?.email}</span></span>
+                <Icon name="dotsv" className="icon u-profile-text" />
+              </button>
+            )}
+          />
         </div>
       </aside>
 
-      <div className="a-main">
-        <div className="a-mobile-nav-wrap">
-          <div className="a-mobile-nav">
-            {NAV.map((n) => {
-              const badge = badgeFor(n.to);
-              return (
-                <button key={n.to} className={isActive(n.to) ? 'on' : ''} onClick={() => navigate(n.to)}>
-                  {n.label}
-                  {badge && <span className="badge-n">{badge}</span>}
-                </button>
-              );
-            })}
-            <button className="a-mobile-signout" onClick={handleSignOut}>
-              <Icon name="logout" className="icon icon-sm" />
-              Sign out
-            </button>
+      <div className="u-main">
+        <header className={`u-topbar ${scrolled ? 'scrolled' : ''}`}>
+          <IconButton className="u-burger" icon="menu" label="Open menu" onClick={() => setMobileOpen(true)} />
+          <div className="u-crumbs">
+            {current && <span className="hide-xs">{current.group}</span>}
+            {current && <Icon name="cright" />}
+            <b>{current?.label || 'Admin'}</b>
           </div>
-        </div>
-        <header className="a-top">
-          <h1>{current?.label || 'Admin'}</h1>
-          <div className="a-top-meta">
-            <span className="a-top-date">
-              {now.toLocaleString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })}
-            </span>
-            <a className="btn btn-outline btn-sm" href={STOREFRONT_URL} target="_blank" rel="noreferrer">
-              <Icon name="external" className="icon icon-sm" />
-              <span className="hide-xs">Storefront</span>
-            </a>
+          <div className="u-topbar-right">
+            <IconButton icon="search" label="Search (⌘K)" onClick={() => setCmdOpen(true)} />
+            <a className="u-btn sm" href={STOREFRONT_URL} target="_blank" rel="noreferrer"><Icon name="external" /><span className="hide-xs">View store</span></a>
             <NotificationBell />
-            <button className="iconbtn a-top-signout" aria-label="Sign out" title="Sign out" onClick={handleSignOut}>
-              <Icon name="logout" className="icon icon-sm" />
-            </button>
           </div>
         </header>
-        <div className="a-body">
+        <main className="u-content">
           <Outlet />
-        </div>
+        </main>
       </div>
+
+      <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} items={commands} />
     </div>
   );
 }

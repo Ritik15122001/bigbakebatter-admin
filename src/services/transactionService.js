@@ -13,5 +13,6 @@ function query(params) {
 export const transactionService = {
   list: (params = {}) => api.get(`/transactions${query(params)}`),
   summary: () => api.get('/transactions/summary'),
+  /** Records a refund (the money itself is refunded in Razorpay) and cancels the linked order. */
   refund: (id) => api.patch(`/transactions/${id}/refund`, {}),
 };

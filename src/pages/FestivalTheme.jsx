@@ -1,21 +1,30 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Icon from '../components/common/Icon';
-import ImageField from '../components/common/ImageField';
+import {
+  Page, Card, Button, Field, Input, Textarea, Select, Switch, Status, Segmented, Alert, Loader, ImageUpload,
+  KeyValue, toast, useAsync,
+} from '../ui';
+import { SaveBar } from '../ui/ext-web';
+import { STOREFRONT_URL, isValidLink, useUnloadGuard } from '../ui/ext-web-utils';
 import { settingsService } from '../services/settingsService';
-import { useUiStore } from '../store/uiStore';
 import { resolveImg } from '../utils/media';
+import { fmtDate } from '../utils/format';
 
-const STOREFRONT_URL = import.meta.env.VITE_STOREFRONT_URL || 'http://localhost:5301';
-
-// Must match FESTIVAL_PRESETS in the storefront (src/festive/presets.js).
+// Must match FESTIVAL_PRESETS in the storefront (src/festive/presets.js) and the backend `preset` enum.
 const PRESETS = [{ value: 'diwali', label: 'Diwali', swatch: ['#4a120a', '#e2570a', '#f4b740'] }];
 
 const EFFECTS = [
-  { key: 'palette', label: 'Festive colours', hint: 'Saffron buttons, maroon announcement bar, gold-trimmed footer.' },
-  { key: 'banner', label: 'Homepage festival banner', hint: 'Greeting, headline and button with flickering diyas, under the main slider.' },
-  { key: 'garland', label: 'Marigold garland', hint: 'A toran of marigolds and bells hanging under the top menu on every page.' },
-  { key: 'lights', label: 'Floating diya lights', hint: 'Soft glowing lights drifting up the screen.' },
-  { key: 'fireworks', label: 'Fireworks', hint: 'Occasional small firework bursts at the top of the screen.' },
+  { key: 'palette', icon: 'palette', label: 'Festive colours', hint: 'Saffron buttons, maroon announcement bar and a gold-trimmed footer.' },
+  { key: 'banner', icon: 'image', label: 'Homepage festival banner', hint: 'Greeting, headline and button with flickering diyas, under the main slider.' },
+  { key: 'garland', icon: 'flower', label: 'Marigold garland', hint: 'A toran of marigolds and bells hanging under the top menu on every page.' },
+  { key: 'lights', icon: 'flame', label: 'Floating diya lights', hint: 'Soft glowing lights drifting up the screen.' },
+  { key: 'fireworks', icon: 'sparkles', label: 'Fireworks', hint: 'Occasional small firework bursts at the top of the screen.' },
+];
+
+const INTENSITY = [
+  { value: 'subtle', label: 'Subtle', note: 'About 10 lights per screen, fireworks every 9–14 seconds.' },
+  { value: 'medium', label: 'Medium', note: 'About 18 lights per screen, fireworks every 5–9 seconds.' },
+  { value: 'festive', label: 'Full festive', note: 'About 28 lights per screen, fireworks every 3–5 seconds.' },
 ];
 
 const DEFAULTS = {
@@ -25,6 +34,7 @@ const DEFAULTS = {
   cta: 'Shop Diwali treats', ctaHref: '/shop', image: '', intensity: 'medium',
   effects: { palette: true, banner: true, garland: true, lights: true, fireworks: true },
 };
+const LIMITS = { greeting: 60, headline: 140, sub: 300, cta: 40 };
 
 const toDateInput = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '');
 const toForm = (f = {}) => ({
@@ -32,186 +42,218 @@ const toForm = (f = {}) => ({
   startsAt: toDateInput(f.startsAt), endsAt: toDateInput(f.endsAt),
   effects: { ...DEFAULTS.effects, ...(f.effects || {}) },
 });
+const localToday = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const pretty = (ymd) => (ymd ? fmtDate(`${ymd}T00:00:00`) : '');
 
 /** Mirrors the storefront's "is it live right now" rule. */
 function liveStatus(f) {
-  if (!f.enabled) return { label: 'Off', tone: 'neutral', note: 'The website shows its normal design.' };
-  const today = new Date().toISOString().slice(0, 10);
-  if (f.startsAt && today < f.startsAt) return { label: 'Scheduled', tone: 'warn', note: `Turns on automatically on ${f.startsAt}.` };
-  if (f.endsAt && today > f.endsAt) return { label: 'Ended', tone: 'neutral', note: `The end date (${f.endsAt}) has passed, so the website shows its normal design.` };
-  return { label: 'Live now', tone: 'success', note: f.endsAt ? `Showing on the website until the end of ${f.endsAt}.` : 'Showing on the website until you turn it off.' };
+  const today = localToday();
+  if (!f.enabled) return { key: 'Off', note: 'The website shows its normal design.' };
+  if (f.startsAt && today < f.startsAt) return { key: 'Scheduled', note: `Turns on automatically on ${pretty(f.startsAt)}${f.endsAt ? ` and runs until ${pretty(f.endsAt)}` : ''}.` };
+  if (f.endsAt && today > f.endsAt) return { key: 'Ended', note: `The end date (${pretty(f.endsAt)}) has passed, so the website shows its normal design.` };
+  return { key: 'Live', note: f.endsAt ? `Showing on the website until the end of ${pretty(f.endsAt)}.` : 'Showing on the website until you switch it off.' };
+}
+const STATUS_TONE = { Off: 'gray', Scheduled: 'blue', Live: 'green', Ended: 'gray' };
+
+/* ---------------- banner preview ---------------- */
+
+function DiwaliBanner({ form }) {
+  return (
+    <div className={`w-diwali ${form.image ? 'with-img' : ''} ${form.effects.banner ? '' : 'dim'}`}>
+      <div className="w-diwali-copy">
+        <span className="w-diwali-greet">{form.greeting || 'Greeting'}</span>
+        <h3>{form.headline || 'Headline'}</h3>
+        {form.sub && <p>{form.sub}</p>}
+        {form.cta && <span className="w-diwali-cta">{form.cta}<Icon name="aright" /></span>}
+        <div className="w-diyas" aria-hidden="true">{Array.from({ length: 5 }, (_, i) => <span key={i} className="w-diya" />)}</div>
+      </div>
+      {form.image ? (
+        <div className="w-diwali-img"><img src={resolveImg(form.image)} alt="" /></div>
+      ) : (
+        <div className="w-rangoli hide-xs" aria-hidden="true"><span /></div>
+      )}
+    </div>
+  );
 }
 
+/* ---------------- page ---------------- */
+
 export default function FestivalTheme() {
-  const pushToast = useUiStore((s) => s.pushToast);
+  const { data, loading, error, reload } = useAsync(settingsService.get);
   const [form, setForm] = useState(null);
   const [saved, setSaved] = useState(null);
-  const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
 
-  const load = useCallback(() => {
-    setError('');
-    settingsService
-      .get()
-      .then((s) => {
-        const f = toForm(s.festival);
-        setForm(f);
-        setSaved(JSON.stringify(f));
-      })
-      .catch((e) => setError(e.message));
-  }, []);
-  useEffect(load, [load]);
+  useEffect(() => {
+    if (!data) return;
+    const f = toForm(data.festival);
+    setForm(f);
+    setSaved(JSON.stringify(f));
+  }, [data]);
 
-  if (error) {
-    return (
-      <div className="a-panel a-empty">
-        <p className="muted">Could not load the festive theme: {error}</p>
-        <button className="btn btn-outline btn-sm" onClick={load} style={{ marginTop: 12 }}>Try again</button>
-      </div>
-    );
-  }
-  if (!form) return <div className="a-panel a-empty"><p className="muted">Loading…</p></div>;
+  const dirty = !!form && JSON.stringify(form) !== saved;
+  useUnloadGuard(dirty);
 
-  const dirty = JSON.stringify(form) !== saved;
-  const status = liveStatus(form);
-  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
-  const setEffect = (k, v) => setForm({ ...form, effects: { ...form.effects, [k]: v } });
-  const preset = PRESETS.find((p) => p.value === form.preset) || PRESETS[0];
+  const errors = useMemo(() => {
+    if (!form) return {};
+    const e = {};
+    if (form.startsAt && form.endsAt && form.startsAt > form.endsAt) e.endsAt = 'End date must be on or after the start date';
+    if (!isValidLink(form.ctaHref)) e.ctaHref = 'Must start with / (a page on this site) or https://';
+    Object.entries(LIMITS).forEach(([k, max]) => { if ((form[k] || '').length > max) e[k] = `Keep it under ${max} characters`; });
+    return e;
+  }, [form]);
+  const invalid = Object.keys(errors).length > 0;
 
-  const save = async (next = form) => {
-    if (next.startsAt && next.endsAt && next.startsAt > next.endsAt) {
-      pushToast({ title: 'End date must be after the start date', kind: 'err' });
+  const save = async () => {
+    if (invalid) {
+      toast.error('Check the highlighted fields', Object.values(errors)[0]);
       return;
     }
     setSaving(true);
     try {
-      const res = await settingsService.update({ festival: { ...next, startsAt: next.startsAt || null, endsAt: next.endsAt || null } });
+      const res = await settingsService.updateFestival({ ...form, startsAt: form.startsAt || null, endsAt: form.endsAt || null });
       const f = toForm(res.festival);
       setForm(f);
       setSaved(JSON.stringify(f));
-      pushToast({ title: f.enabled ? 'Festive theme saved' : 'Festive theme turned off', subtitle: liveStatus(f).note, kind: 'ok' });
+      const st = liveStatus(f);
+      toast.success(f.enabled ? `Festive theme saved · ${st.key}` : 'Festive theme turned off', st.note);
     } catch (err) {
-      pushToast({ title: 'Could not save', subtitle: err.message, kind: 'err' });
+      toast.error('Could not save', err.message);
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="a-grid-2">
-      <div className="stack gap-5">
-        <div className="a-panel">
-          <div className="a-panel-head">
-            <h3>Festive theme</h3>
-            <span className={`badge ${status.tone}`}>{status.label}</span>
-          </div>
-          <div className="stack gap-4" style={{ padding: 'var(--s-5)' }}>
-            <p className="small muted">
-              Dress the website up for a festival. Nothing changes on the website until you switch this on — and switching it off
-              brings the normal design straight back.
-            </p>
-            <label className="check">
-              <input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} />
-              <span><b>Show the festive theme on the website</b><br /><span className="muted">{status.note}</span></span>
-            </label>
-            <div className="form-grid two">
-              <div className="field">
-                <label>Festival</label>
-                <select className="select" value={form.preset} onChange={set('preset')}>
-                  {PRESETS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-                </select>
-              </div>
-              <div className="field">
-                <label>Effect strength</label>
-                <select className="select" value={form.intensity} onChange={set('intensity')}>
-                  <option value="subtle">Subtle</option>
-                  <option value="medium">Medium</option>
-                  <option value="festive">Full festive</option>
-                </select>
-              </div>
-              <div className="field">
-                <label>Start date (optional)</label>
-                <input className="input" type="date" value={form.startsAt} onChange={set('startsAt')} />
-              </div>
-              <div className="field">
-                <label>End date (optional)</label>
-                <input className="input" type="date" value={form.endsAt} min={form.startsAt || undefined} onChange={set('endsAt')} />
-                <span className="field-hint">Leave the dates empty to show it until you switch it off.</span>
-              </div>
-            </div>
-          </div>
-        </div>
+    <Page
+      title="Festive theme"
+      description="Dress the website up for a festival. Nothing changes until you switch it on — switching it off brings the normal design straight back."
+      actions={<Button as="a" href={STOREFRONT_URL} target="_blank" rel="noreferrer" icon="external">View website</Button>}
+    >
+      <Loader loading={(loading && !data) || (data && !form)} error={!data ? error : ''} onRetry={reload} rows={6}>
+        {form && <FestivalBody form={form} setForm={setForm} errors={errors} />}
+        {form && (
+          <SaveBar
+            dirty={dirty}
+            saving={saving}
+            onSave={save}
+            onDiscard={() => setForm(JSON.parse(saved))}
+            note={dirty ? 'Nothing changes on the website until you save.' : liveStatus(JSON.parse(saved)).note}
+            disabled={invalid}
+          />
+        )}
+      </Loader>
+    </Page>
+  );
+}
 
-        <div className="a-panel">
-          <div className="a-panel-head"><h3>Effects</h3></div>
-          <div className="stack gap-4" style={{ padding: 'var(--s-5)' }}>
+function FestivalBody({ form, setForm, errors }) {
+  const status = liveStatus(form);
+  const preset = PRESETS.find((p) => p.value === form.preset) || PRESETS[0];
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const setEffect = (k, v) => setForm((f) => ({ ...f, effects: { ...f.effects, [k]: v } }));
+  const onCount = EFFECTS.filter((fx) => form.effects[fx.key]).length;
+  const count = (k) => <span className={(form[k] || '').length > LIMITS[k] ? 'u-error' : ''}>{(form[k] || '').length}/{LIMITS[k]}</span>;
+
+  return (
+    <div className="u-stack">
+      <div className={`w-fest-hero ${form.enabled ? '' : 'off'}`}>
+        <span className="w-fest-ico"><Icon name="flame" /></span>
+        <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+          <div className="u-row" style={{ gap: 8 }}>
+            <h2>{preset.label} theme</h2>
+            <Status tone={STATUS_TONE[status.key]}>{status.key === 'Live' ? 'Live now' : status.key}</Status>
+          </div>
+          <p>{status.note}</p>
+        </div>
+        <div className="w-fest-switch">
+          <Switch checked={form.enabled} onChange={(enabled) => setForm((f) => ({ ...f, enabled }))} label="Show on the website" description={form.enabled ? 'Switched on' : 'Switched off'} />
+        </div>
+        <div className="w-fest-steps" aria-label="Theme status">
+          {['Off', 'Scheduled', 'Live', 'Ended'].map((k) => <span key={k} className={status.key === k ? 'on' : ''}>{k === 'Live' ? 'Live now' : k}</span>)}
+        </div>
+      </div>
+
+      <div className="u-grid cols-2">
+        <Card title="Festival & schedule" subtitle="Pick the festival and, optionally, when it runs." icon="cal">
+          <div className="u-stack tight" style={{ gap: 16 }}>
+            <Field label="Festival" hint={<span className="u-row" style={{ gap: 6 }}><span className="w-swatch">{preset.swatch.map((c) => <i key={c} style={{ background: c }} />)}</span>Colours, decorations and banner style</span>}>
+              {(id) => <Select id={id} value={form.preset} onChange={set('preset')} options={PRESETS} />}
+            </Field>
+            <div className="u-form-grid two">
+              <Field label="Start date" hint="Optional">
+                {(id) => <Input id={id} type="date" value={form.startsAt} onChange={set('startsAt')} />}
+              </Field>
+              <Field label="End date" error={errors.endsAt} hint="Optional · last day shown">
+                {(id) => <Input id={id} type="date" value={form.endsAt} min={form.startsAt || undefined} onChange={set('endsAt')} error={!!errors.endsAt} />}
+              </Field>
+            </div>
+            <div className="u-row">
+              <Button size="sm" icon="cal" onClick={() => setForm((f) => ({ ...f, startsAt: localToday() }))}>Start today</Button>
+              {(form.startsAt || form.endsAt) && <Button size="sm" variant="ghost" icon="x" onClick={() => setForm((f) => ({ ...f, startsAt: '', endsAt: '' }))}>Clear dates</Button>}
+            </div>
+            <KeyValue
+              items={[
+                ['Starts', form.startsAt ? pretty(form.startsAt) : 'As soon as it’s switched on'],
+                ['Ends', form.endsAt ? pretty(form.endsAt) : 'When you switch it off'],
+                ['Right now', status.key === 'Live' ? 'Live on the website' : status.key],
+              ]}
+            />
+          </div>
+        </Card>
+
+        <Card title="Effects" subtitle={`${onCount} of ${EFFECTS.length} switched on`} icon="sparkles">
+          <div className="u-stack tight" style={{ gap: 0 }}>
+            <Field label="Effect strength" hint={INTENSITY.find((i) => i.value === form.intensity)?.note}>
+              <Segmented value={form.intensity} onChange={(intensity) => setForm((f) => ({ ...f, intensity }))} items={INTENSITY} />
+            </Field>
+            <div style={{ height: 18 }} />
             {EFFECTS.map((fx) => (
-              <label className="check" key={fx.key}>
-                <input type="checkbox" checked={!!form.effects[fx.key]} onChange={(e) => setEffect(fx.key, e.target.checked)} />
-                <span><b>{fx.label}</b><br /><span className="muted">{fx.hint}</span></span>
-              </label>
-            ))}
-            <span className="field-hint">Animations switch off automatically for visitors who have “reduce motion” turned on in their device settings.</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="stack gap-5">
-        <div className="a-panel">
-          <div className="a-panel-head"><h3>Festival banner</h3></div>
-          <div className="form-grid two" style={{ padding: 'var(--s-5)' }}>
-            <div className="field"><label>Greeting</label><input className="input" value={form.greeting} onChange={set('greeting')} placeholder="Happy Diwali" /></div>
-            <div className="field"><label>Button text</label><input className="input" value={form.cta} onChange={set('cta')} placeholder="Shop Diwali treats" /></div>
-            <div className="field span2"><label>Headline</label><input className="input" value={form.headline} onChange={set('headline')} /></div>
-            <div className="field span2"><label>Text</label><textarea className="textarea" rows={2} value={form.sub} onChange={set('sub')} /></div>
-            <div className="field span2">
-              <label>Button link</label>
-              <input className="input" value={form.ctaHref} onChange={set('ctaHref')} placeholder="/shop or https://…" />
-              <span className="field-hint">Tip: link to a category, e.g. /shop?category=Brownies</span>
-            </div>
-            <div className="field span2">
-              <label>Banner photo (optional)</label>
-              <ImageField value={form.image} onChange={(v) => setForm({ ...form, image: v })} onUploadingChange={setUploading} />
-              <span className="field-hint">Without a photo the banner shows an illustrated rangoli.</span>
-            </div>
-          </div>
-
-          <div style={{ padding: '0 var(--s-5) var(--s-5)' }}>
-            <span className="field-hint" style={{ display: 'block', marginBottom: 8 }}>Preview</span>
-            <div
-              style={{
-                display: 'grid', gridTemplateColumns: form.image ? '1.4fr 1fr' : '1fr', borderRadius: 12, overflow: 'hidden',
-                background: `radial-gradient(rgba(255,209,102,.14) 1.2px, transparent 1.6px) 0 0/18px 18px, linear-gradient(135deg, ${preset.swatch[0]}, #2a0b06)`,
-                color: '#f6dfbd', opacity: form.effects.banner ? 1 : 0.45,
-              }}
-            >
-              <div style={{ padding: 18 }}>
-                <div style={{ fontFamily: 'var(--f-script)', fontSize: 26, color: '#ffcf5c', lineHeight: 1 }}>{form.greeting}</div>
-                <div style={{ color: '#fff4dc', fontWeight: 700, fontSize: 17, margin: '6px 0 4px' }}>{form.headline}</div>
-                <div style={{ fontSize: 12.5, color: '#efd2a8' }}>{form.sub}</div>
-                {form.cta && <span className="btn btn-sm" style={{ marginTop: 10, background: preset.swatch[1], color: '#fff' }}>{form.cta} <Icon name="aright" className="icon icon-sm" /></span>}
+              <div className="w-effect" key={fx.key}>
+                <span className="w-effect-ico"><Icon name={fx.icon} /></span>
+                <Switch checked={!!form.effects[fx.key]} onChange={(v) => setEffect(fx.key, v)} label={fx.label} description={fx.hint} />
               </div>
-              {form.image && <img src={resolveImg(form.image)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', minHeight: 120 }} />}
-            </div>
-            {!form.effects.banner && <span className="field-hint">The banner is switched off in Effects.</span>}
+            ))}
+            <p className="u-xs u-muted" style={{ marginTop: 10 }}>Animations switch off automatically for visitors who turn on “reduce motion” in their device settings.</p>
           </div>
-        </div>
-
-        <div className="a-panel">
-          <div className="row gap-3 wrap" style={{ padding: 'var(--s-5)', alignItems: 'center' }}>
-            <button className="btn btn-primary" onClick={() => save()} disabled={saving || uploading || !dirty}>
-              {saving ? 'Saving…' : 'Save changes'}
-            </button>
-            {dirty && <button className="btn btn-ghost" onClick={() => setForm(JSON.parse(saved))} disabled={saving}>Undo</button>}
-            <a className="btn btn-outline" href={STOREFRONT_URL} target="_blank" rel="noreferrer">
-              <Icon name="external" className="icon icon-sm" />
-              View website
-            </a>
-            {dirty && <span className="badge warn">Unsaved changes</span>}
-          </div>
-        </div>
+        </Card>
       </div>
+
+      <Card title="Homepage festival banner" subtitle="Shown under the main slider while the theme is live." icon="image">
+        <div className="u-grid cols-2">
+          <div className="u-stack tight" style={{ gap: 16 }}>
+            {!form.effects.banner && <Alert tone="amber" icon="eyeoff" title="Banner is switched off">Turn on “Homepage festival banner” in Effects to show it.</Alert>}
+            <div className="u-form-grid two">
+              <Field label="Greeting" error={errors.greeting} hint={count('greeting')}>
+                {(id) => <Input id={id} value={form.greeting} onChange={set('greeting')} placeholder="Happy Diwali" error={!!errors.greeting} />}
+              </Field>
+              <Field label="Button text" error={errors.cta} hint={count('cta')}>
+                {(id) => <Input id={id} value={form.cta} onChange={set('cta')} placeholder="Shop Diwali treats" error={!!errors.cta} />}
+              </Field>
+            </div>
+            <Field label="Headline" error={errors.headline} hint={count('headline')}>
+              {(id) => <Input id={id} value={form.headline} onChange={set('headline')} error={!!errors.headline} />}
+            </Field>
+            <Field label="Text" error={errors.sub} hint={count('sub')}>
+              {(id) => <Textarea id={id} rows={2} value={form.sub} onChange={set('sub')} error={!!errors.sub} style={{ minHeight: 70 }} />}
+            </Field>
+            <Field label="Button link" error={errors.ctaHref} hint="Tip: link to a category, e.g. /shop?category=Brownies">
+              {(id) => <Input id={id} icon="link" value={form.ctaHref} onChange={set('ctaHref')} placeholder="/shop or https://…" error={!!errors.ctaHref} />}
+            </Field>
+            <Field label="Banner photo (optional)" hint="Without a photo the banner shows an illustrated rangoli.">
+              <ImageUpload value={form.image} onChange={(image) => setForm((f) => ({ ...f, image }))} />
+            </Field>
+          </div>
+          <div className="u-stack tight" style={{ position: 'sticky', top: 80, alignSelf: 'start' }}>
+            <span className="u-label">Preview</span>
+            <DiwaliBanner form={form} />
+            <span className="u-xs u-muted">{form.effects.banner ? 'Approximate look — the website adds gently drifting lights on top.' : 'The banner is switched off in Effects.'}</span>
+          </div>
+        </div>
+      </Card>
     </div>
   );
 }

@@ -1,505 +1,272 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import Icon from '../components/common/Icon';
-import Modal from '../components/common/Modal';
-import EmptyState from '../components/common/EmptyState';
-import Pagination from '../components/common/Pagination';
+import {
+  Page, Card, Stat, Button, Status, Cell, DataTable, Segmented, Select, Input, Menu, EmptyState, Loader,
+  Tag, useAsync, useConfirm, toast, downloadCsv,
+} from '../ui';
+import { Stars } from '../ui/ext-cat';
 import { productService } from '../services/productService';
-import { categoryService, flavourService } from '../services/catalogService';
-import { uploadService } from '../services/uploadService';
-import { useUiStore } from '../store/uiStore';
-import { money } from '../utils/format';
+import { categoryService } from '../services/catalogService';
+import { money, fmtDate } from '../utils/format';
 import { resolveImg } from '../utils/media';
-import { stockFromQty, stockTone } from '../utils/stock';
 
-// Same default multipliers the storefront uses to compute 1/1.5/2 KG prices
-// from the 0.5 KG base price when an admin hasn't set an explicit price for
-// that weight. Kept in sync with BigBakeBatter/src/data/products.js.
-const WEIGHT_TIERS = [
-  { w: '1 KG', mult: 1.7 },
-  { w: '1.5 KG', mult: 2.39 },
-  { w: '2 KG', mult: 3.08 },
+const STOREFRONT_URL = (import.meta.env.VITE_STOREFRONT_URL || 'http://localhost:5301').replace(/\/$/, '');
+
+const loadAll = () => Promise.all([productService.list(), categoryService.list()]).then(([products, categories]) => ({ products, categories }));
+
+const SORTS = [
+  { value: 'new', label: 'Newest first', fn: (a, b) => new Date(b.createdAt) - new Date(a.createdAt) },
+  { value: 'price-hi', label: 'Price: high to low', fn: (a, b) => b.base - a.base },
+  { value: 'price-lo', label: 'Price: low to high', fn: (a, b) => a.base - b.base },
+  { value: 'sold', label: 'Best selling', fn: (a, b) => (b.sold || 0) - (a.sold || 0) },
+  { value: 'rating', label: 'Top rated', fn: (a, b) => (b.rating || 0) - (a.rating || 0) },
+  { value: 'qty-lo', label: 'Stock: lowest first', fn: (a, b) => (a.qty || 0) - (b.qty || 0) },
+  { value: 'qty-hi', label: 'Stock: highest first', fn: (a, b) => (b.qty || 0) - (a.qty || 0) },
+  { value: 'name', label: 'Name A–Z', fn: (a, b) => a.name.localeCompare(b.name) },
 ];
-const TIER_LABELS = new Set(WEIGHT_TIERS.map((t) => t.w));
-const autoPrice = (base, mult) => Math.round(((Number(base) || 0) * mult) / 10) * 10;
-const PAGE_SIZE = 10;
 
-const EMPTY = {
-  name: '', cat: '', flavour: '', base: '', qty: '20', tag: '',
-  eggless: true, veg: true, corporate: false, desc: '', img: [],
-  weights: { '1 KG': '', '1.5 KG': '', '2 KG': '' },
-  extraWeights: [], // [{ w, price }] — any weight label other than the standard tiers
+const NO_FILTERS = { cat: '', stock: '', tag: '', eggless: '' };
+
+const readView = () => {
+  try { return localStorage.getItem('bbb_cakes_view') === 'grid' ? 'grid' : 'table'; } catch { return 'table'; }
 };
 
-const isNonNegNumber = (v) => v !== '' && v !== null && Number.isFinite(Number(v)) && Number(v) >= 0;
-
 export default function Cakes() {
-  const pushToast = useUiStore((s) => s.pushToast);
-  const [params, setParams] = useSearchParams();
-  const [list, setList] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [flavours, setFlavours] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
+  const navigate = useNavigate();
+  const confirm = useConfirm();
+  const [params] = useSearchParams();
+  const { data, setData, loading, error, reload } = useAsync(loadAll);
+  const [view, setViewState] = useState(readView);
   const [q, setQ] = useState('');
-  const [catFilter, setCatFilter] = useState('All');
-  const [page, setPage] = useState(1);
-  const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState(EMPTY);
-  const [errors, setErrors] = useState({});
-  const [uploading, setUploading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(null);
-  const [removing, setRemoving] = useState(false);
+  const [f, setF] = useState(NO_FILTERS);
+  const [sort, setSort] = useState('new');
 
-  const load = useCallback(() => {
-    setLoading(true);
-    setLoadError('');
-    Promise.all([productService.list(), categoryService.list()])
-      .then(([products, cats]) => {
-        setList(products);
-        setCategories([...cats].sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name)));
-      })
-      .catch((e) => setLoadError(e.message))
-      .finally(() => setLoading(false));
-    flavourService.list().then((f) => setFlavours(f.map((x) => x.name).sort())).catch(() => {});
-  }, []);
-
+  // Deep link from Categories & stock (/cakes?new=1&cat=Birthday) → the editor.
   useEffect(() => {
-    load();
-  }, [load]);
+    if (params.get('new') === '1') {
+      const cat = params.get('cat');
+      navigate(`/cakes/new${cat ? `?cat=${encodeURIComponent(cat)}` : ''}`, { replace: true });
+    }
+  }, [params, navigate]);
 
-  const catByName = useMemo(() => new Map(categories.map((c) => [c.name, c])), [categories]);
-  const isBoxCat = !!catByName.get(form.cat)?.isBox;
+  const setView = (v) => {
+    setViewState(v);
+    try { localStorage.setItem('bbb_cakes_view', v); } catch { /* storage unavailable */ }
+  };
 
-  const openAdd = useCallback((cat) => {
-    setEditing('new');
-    setErrors({});
-    setForm({ ...EMPTY, cat: cat || categories.find((c) => c.active)?.name || categories[0]?.name || '' });
-  }, [categories]);
-
-  // Deep link from Categories & Stock: /cakes?new=1&cat=Birthday
-  useEffect(() => {
-    if (loading || params.get('new') !== '1') return;
-    openAdd(params.get('cat') || undefined);
-    setParams({}, { replace: true });
-  }, [loading, params, openAdd, setParams]);
-
-  const filtered = useMemo(
-    () => list.filter((p) => (catFilter === 'All' || p.cat === catFilter) && `${p.name} ${p.cat} ${p.flavour || ''}`.toLowerCase().includes(q.trim().toLowerCase())),
-    [list, q, catFilter]
+  const products = useMemo(() => data?.products || [], [data]);
+  const categories = useMemo(
+    () => [...(data?.categories || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name)),
+    [data]
   );
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const safePage = Math.min(page, pageCount);
-  const paged = useMemo(() => filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE), [filtered, safePage]);
+  const catByName = useMemo(() => new Map(categories.map((c) => [c.name, c])), [categories]);
+  const tags = useMemo(() => [...new Set(products.map((p) => p.tag).filter(Boolean))].sort(), [products]);
 
-  const openEdit = (p) => {
-    setEditing(p._id);
-    setErrors({});
-    const weights = Array.isArray(p.weights) ? p.weights : [];
-    const weightMap = new Map(weights.map((w) => [w.w, w.price]));
-    setForm({
-      name: p.name || '', cat: p.cat || '', flavour: p.flavour || '', base: p.base ?? '', qty: String(p.qty ?? 0), tag: p.tag || '',
-      eggless: p.eggless !== false, veg: p.veg !== false, corporate: !!p.corporate, desc: p.desc || '', img: Array.isArray(p.img) ? p.img : [],
-      weights: Object.fromEntries(WEIGHT_TIERS.map((t) => [t.w, weightMap.has(t.w) ? String(weightMap.get(t.w)) : ''])),
-      extraWeights: weights.filter((w) => !TIER_LABELS.has(w.w)).map((w) => ({ w: w.w, price: String(w.price) })),
+  const counts = useMemo(() => ({
+    total: products.length,
+    in: products.filter((p) => p.stock === 'In stock').length,
+    low: products.filter((p) => p.stock === 'Low stock').length,
+    out: products.filter((p) => p.stock === 'Out of stock').length,
+    units: products.reduce((s, p) => s + (p.qty || 0), 0),
+  }), [products]);
+
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const sorter = SORTS.find((s) => s.value === sort)?.fn;
+    return products
+      .filter((p) => {
+        if (needle && !`${p.name} ${p.flavour} ${p.cat} ${p.tag} ${p.desc}`.toLowerCase().includes(needle)) return false;
+        if (f.cat && p.cat !== f.cat) return false;
+        if (f.stock && p.stock !== f.stock) return false;
+        if (f.tag && (f.tag === '__none' ? p.tag : p.tag !== f.tag)) return false;
+        if (f.eggless === 'yes' && p.eggless === false) return false;
+        if (f.eggless === 'no' && p.eggless !== false) return false;
+        return true;
+      })
+      .sort(sorter);
+  }, [products, q, f, sort]);
+
+  const activeFilters = Object.values(f).filter(Boolean).length + (q ? 1 : 0);
+  const clear = () => { setQ(''); setF(NO_FILTERS); };
+
+  const duplicate = async (p) => {
+    try {
+      const copy = await productService.duplicate(p);
+      setData((d) => ({ ...d, products: [copy, ...d.products] }));
+      toast.success('Cake duplicated', `“${copy.name}” was created — opening it now.`);
+      navigate(`/cakes/${copy._id}`);
+    } catch (err) {
+      toast.error('Could not duplicate', err.message);
+    }
+  };
+
+  const remove = async (p) => {
+    const ok = await confirm({
+      title: `Delete “${p.name}”?`,
+      message: 'It disappears from the shop straight away. Past orders keep their own copy of the name and price. This can’t be undone.',
+      confirmLabel: 'Delete cake',
+      danger: true,
     });
-  };
-
-  const closeEditor = () => {
-    if (saving || uploading) return;
-    setEditing(null);
-  };
-
-  const handleFile = async (e) => {
-    const input = e.target;
-    const files = Array.from(input.files || []);
-    if (!files.length) return;
-    setUploading(true);
+    if (!ok) return;
     try {
-      for (const file of files) {
-        const url = await uploadService.upload(file);
-        setForm((f) => ({ ...f, img: [...f.img, url] }));
-      }
+      await productService.remove(p._id);
+      setData((d) => ({ ...d, products: d.products.filter((x) => x._id !== p._id) }));
+      toast.success('Cake deleted', p.name);
     } catch (err) {
-      pushToast({ title: 'Upload failed', subtitle: err.message, kind: 'err' });
-    } finally {
-      setUploading(false);
-      input.value = '';
+      toast.error('Could not delete', err.message);
     }
   };
 
-  const removeImage = (idx) => setForm((f) => ({ ...f, img: f.img.filter((_, i) => i !== idx) }));
-  const moveImage = (idx, dir) => setForm((f) => {
-    const j = idx + dir;
-    if (j < 0 || j >= f.img.length) return f;
-    const img = [...f.img];
-    [img[idx], img[j]] = [img[j], img[idx]];
-    return { ...f, img };
-  });
+  const rowActions = (p) => [
+    { label: 'Edit', icon: 'edit', onClick: () => navigate(`/cakes/${p._id}`) },
+    { label: 'Duplicate', icon: 'copy', onClick: () => duplicate(p) },
+    { label: 'View on store', icon: 'external', href: `${STOREFRONT_URL}/product/${p._id}`, external: true },
+    { divider: true },
+    { label: 'Delete', icon: 'trash', danger: true, onClick: () => remove(p) },
+  ];
 
-  const setExtra = (i, patch) => setForm((f) => ({ ...f, extraWeights: f.extraWeights.map((x, j) => (j === i ? { ...x, ...patch } : x)) }));
-  const addExtra = () => setForm((f) => ({ ...f, extraWeights: [...f.extraWeights, { w: '', price: '' }] }));
-  const removeExtra = (i) => setForm((f) => ({ ...f, extraWeights: f.extraWeights.filter((_, j) => j !== i) }));
+  const isBox = (p) => !!catByName.get(p.cat)?.isBox;
 
-  const validate = () => {
-    const errs = {};
-    if (form.name.trim().length < 2) errs.name = 'Enter a name (at least 2 characters).';
-    if (!form.cat) errs.cat = 'Choose a category.';
-    if (!isNonNegNumber(form.base) || Number(form.base) <= 0) errs.base = 'Enter a price greater than 0.';
-    if (!isNonNegNumber(form.qty) || !Number.isInteger(Number(form.qty))) errs.qty = 'Enter a whole number, 0 or more.';
-    if (!isBoxCat) {
-      WEIGHT_TIERS.forEach((t) => {
-        const v = form.weights[t.w];
-        if (v !== '' && !isNonNegNumber(v)) errs[`w:${t.w}`] = 'Price must be 0 or more.';
-      });
-      const seen = new Set(TIER_LABELS);
-      form.extraWeights.forEach((x, i) => {
-        const label = x.w.trim();
-        if (!label) errs[`x:${i}`] = 'Enter a weight label, e.g. 3 KG.';
-        else if (seen.has(label)) errs[`x:${i}`] = `"${label}" is already listed.`;
-        else if (!isNonNegNumber(x.price)) errs[`x:${i}`] = 'Enter a price for this weight.';
-        seen.add(label);
-      });
-    }
-    return errs;
+  const exportCsv = () => {
+    downloadCsv(
+      'cakes',
+      ['Name', 'Category', 'Flavour', 'Base price', 'Weight prices', 'Qty', 'Stock', 'Sold', 'Rating', 'Reviews', 'Tag', 'Eggless', 'Veg', 'Corporate', 'Photos', 'Added'],
+      filtered.map((p) => [
+        p.name, p.cat, p.flavour, p.base, (p.weights || []).map((w) => `${w.w}: ${w.price}`).join('; '), p.qty ?? 0, p.stock, p.sold || 0,
+        p.rating || 0, p.reviews || 0, p.tag, p.eggless !== false ? 'Yes' : 'No', p.veg !== false ? 'Yes' : 'No', p.corporate ? 'Yes' : 'No',
+        (p.img || []).length, fmtDate(p.createdAt),
+      ])
+    );
   };
 
-  const save = async (e) => {
-    e?.preventDefault();
-    if (saving || uploading) return;
-    const errs = validate();
-    setErrors(errs);
-    const firstErr = Object.values(errs)[0];
-    if (firstErr) {
-      pushToast({ title: 'Please fix the highlighted fields', subtitle: firstErr, kind: 'err' });
-      return;
-    }
-    // Standard tiers left blank keep following the storefront's default
-    // multiplier; typed ones become overrides. Extra weights are always saved.
-    const weights = isBoxCat
-      ? [
-        // a box has no weight picker — keep whatever was stored so switching category back loses nothing
-        ...WEIGHT_TIERS.filter((t) => form.weights[t.w] !== '').map((t) => ({ w: t.w, price: Number(form.weights[t.w]) })),
-        ...form.extraWeights.filter((x) => x.w.trim() && isNonNegNumber(x.price)).map((x) => ({ w: x.w.trim(), price: Number(x.price) })),
-      ]
-      : [
-        ...WEIGHT_TIERS.filter((t) => form.weights[t.w] !== '').map((t) => ({ w: t.w, price: Number(form.weights[t.w]) })),
-        ...form.extraWeights.map((x) => ({ w: x.w.trim(), price: Number(x.price) })),
-      ];
-    const qty = Math.max(0, Math.floor(Number(form.qty)));
-    const payload = {
-      name: form.name.trim(),
-      cat: form.cat,
-      flavour: form.flavour.trim(),
-      base: Number(form.base),
-      weights,
-      qty,
-      stock: stockFromQty(qty),
-      tag: form.tag.trim(),
-      eggless: form.eggless,
-      veg: form.veg,
-      corporate: form.corporate,
-      desc: form.desc,
-      img: form.img,
-    };
-    setSaving(true);
-    try {
-      if (editing === 'new') {
-        await productService.create(payload);
-        pushToast({ title: 'Cake added', kind: 'ok' });
-      } else {
-        await productService.update(editing, payload);
-        pushToast({ title: 'Cake updated', kind: 'ok' });
-      }
-      setEditing(null);
-      load();
-    } catch (err) {
-      pushToast({ title: 'Save failed', subtitle: err.message, kind: 'err' });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const confirmDelete = async () => {
-    setRemoving(true);
-    try {
-      await productService.remove(deleting._id);
-      pushToast({ title: 'Cake deleted', kind: 'info' });
-      setDeleting(null);
-      load();
-    } catch (err) {
-      pushToast({ title: 'Delete failed', subtitle: err.message, kind: 'err' });
-    } finally {
-      setRemoving(false);
-    }
-  };
-
-  const err = (k) => errors[k] && <span className="field-hint field-err">{errors[k]}</span>;
-  const derivedStock = stockFromQty(form.qty);
+  const columns = [
+    {
+      key: 'name', header: 'Cake', sortable: true,
+      render: (p) => <Cell thumb={p.img?.[0] || ''} title={p.name} sub={[p.flavour, p.eggless !== false ? 'Eggless' : 'Contains egg'].filter(Boolean).join(' · ')} />,
+    },
+    {
+      key: 'cat', header: 'Category', sortable: true,
+      render: (p) => (
+        <span className="u-cell-text">
+          <span style={{ color: 'var(--u-ink)', fontWeight: 500 }}>{p.cat}</span>
+          {catByName.get(p.cat) && !catByName.get(p.cat).active && <span>Category hidden</span>}
+          {!catByName.get(p.cat) && <span style={{ color: 'var(--u-red)' }}>Category missing</span>}
+        </span>
+      ),
+    },
+    { key: 'tag', header: 'Tag', render: (p) => (p.tag ? <Tag>{p.tag}</Tag> : <span className="u-faint">—</span>) },
+    {
+      key: 'base', header: 'Price', sortable: true, align: 'right',
+      render: (p) => <span className="u-cell-text" style={{ alignItems: 'flex-end' }}><b className="u-num">{money(p.base)}</b><span>{isBox(p) ? 'per box' : 'from 0.5 KG'}</span></span>,
+    },
+    { key: 'qty', header: 'Stock', sortable: true, sortValue: (p) => p.qty || 0, render: (p) => <span className="u-row" style={{ gap: 8, flexWrap: 'nowrap' }}><Status size="sm">{p.stock}</Status><span className="u-small u-num u-muted">{p.qty ?? 0} left</span></span> },
+    { key: 'sold', header: 'Sold', sortable: true, align: 'right', sortValue: (p) => p.sold || 0, render: (p) => <span className="u-num">{p.sold || 0}</span> },
+    {
+      key: 'rating', header: 'Rating', sortable: true, sortValue: (p) => p.rating || 0,
+      render: (p) => <span className="u-row" style={{ gap: 6, flexWrap: 'nowrap' }}><Stars rating={p.rating} size="sm" /><span className="u-small u-num">{p.rating || 0} <span className="u-muted">({p.reviews || 0})</span></span></span>,
+    },
+  ];
 
   return (
-    <div className="a-panel">
-      <div className="a-panel-head">
-        <div className="a-filters" style={{ border: 0, padding: 0, background: 'none', flex: '1 1 320px' }}>
-          <div className="field f-grow">
-            <input className="input" placeholder="Search cakes..." value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
-          </div>
-          <div className="field f-sm">
-            <select className="select" value={catFilter} onChange={(e) => { setCatFilter(e.target.value); setPage(1); }}>
-              <option>All</option>
-              {categories.map((c) => <option key={c._id} value={c.name}>{c.name}{c.active ? '' : ' (hidden)'}</option>)}
-            </select>
-          </div>
-          {!loading && <span className="a-count">{filtered.length} cake{filtered.length === 1 ? '' : 's'}</span>}
-        </div>
-        <button className="btn btn-primary btn-sm" onClick={() => openAdd()} disabled={loading}>
-          <Icon name="plus" className="icon icon-sm" />
-          Add cake
-        </button>
-      </div>
-
-      {loading ? (
-        <div className="a-empty"><p className="muted">Loading cakes…</p></div>
-      ) : loadError ? (
-        <div className="a-empty">
-          <p className="muted">Could not load cakes: {loadError}</p>
-          <button className="btn btn-outline btn-sm" onClick={load}>Try again</button>
-        </div>
-      ) : filtered.length === 0 ? (
-        <EmptyState icon="cake" title="No cakes found" message="Try a different search or category, or add a new cake." />
-      ) : (
+    <Page
+      title="Cakes"
+      description="Everything on the menu — photos, prices by weight, stock and ratings. Click a cake to edit it."
+      actions={
         <>
-          <div className="a-table-wrap">
-            <table className="tbl">
-              <thead>
-                <tr><th>Cake</th><th>Category</th><th className="num">Price</th><th className="tight">Stock</th><th className="act" /></tr>
-              </thead>
-              <tbody>
-                {paged.map((p) => (
-                  <tr key={p._id} onClick={() => openEdit(p)}>
-                    <td>
-                      <span className="row gap-3 center">
-                        <span className="tbl-thumb">
-                          {p.img?.[0] && <img src={resolveImg(p.img[0])} alt="" />}
-                        </span>
-                        <span style={{ minWidth: 0 }}>
-                          <span className="cell-main">{p.name}</span>
-                          <span className="cell-sub">{[p.flavour, p.tag].filter(Boolean).join(' · ') || '—'}</span>
-                        </span>
-                      </span>
-                    </td>
-                    <td>
-                      {p.cat}
-                      {catByName.get(p.cat) && !catByName.get(p.cat).active && <span className="cell-sub">Category hidden</span>}
-                    </td>
-                    <td className="num cell-main">{money(p.base)}</td>
-                    <td className="tight">
-                      <span className={`badge ${stockTone(p.stock)}`}>{p.stock}</span>
-                      <span className="cell-sub">Qty {p.qty ?? 0}</span>
-                    </td>
-                    <td className="act rowact" onClick={(e) => e.stopPropagation()}>
-                      <button className="iconbtn" aria-label="Edit" onClick={() => openEdit(p)}>
-                        <Icon name="edit" className="icon icon-sm" />
-                      </button>
-                      <button className="iconbtn danger" aria-label="Delete" onClick={() => setDeleting(p)}>
-                        <Icon name="trash" className="icon icon-sm" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <Pagination page={safePage} pageSize={PAGE_SIZE} total={filtered.length} onPage={setPage} />
+          <Button icon="grid" onClick={() => navigate('/stock')}>Categories & stock</Button>
+          <Button variant="primary" icon="plus" onClick={() => navigate('/cakes/new')}>Add cake</Button>
         </>
-      )}
+      }
+    >
+      <Loader loading={loading && !data} error={!data ? error : ''} onRetry={reload} rows={6}>
+        {data && (
+          <div className="u-stack">
+            <div className="u-grid cols-4 u-x-stats">
+              <Stat label="Total cakes" icon="cake" tone="brand" value={counts.total} note={`${categories.length} categories · ${counts.units} units`} onClick={() => setF({ ...f, stock: '' })} />
+              <Stat label="In stock" icon="check" tone="green" value={counts.in} note="7 or more available" onClick={() => setF({ ...f, stock: 'In stock' })} />
+              <Stat label="Low stock" icon="alert" tone="amber" value={counts.low} note="1–6 left · restock soon" onClick={() => setF({ ...f, stock: 'Low stock' })} />
+              <Stat label="Out of stock" icon="ban" tone="red" value={counts.out} note="Shown as sold out" onClick={() => setF({ ...f, stock: 'Out of stock' })} />
+            </div>
 
-      <Modal
-        open={!!editing}
-        onClose={closeEditor}
-        kicker={editing === 'new' ? 'New cake' : 'Edit cake'}
-        title={editing === 'new' ? 'Add a cake' : form.name || 'Cake'}
-        foot={
-          <button className="btn btn-primary btn-block" onClick={save} disabled={saving || uploading}>
-            {saving ? 'Saving…' : uploading ? 'Uploading photo…' : 'Save cake'}
-          </button>
-        }
-      >
-        <form className="stack gap-4" onSubmit={save}>
-          <div className="field">
-            <label>Photos</label>
-            {form.img.length > 0 && (
-              <div className="img-strip">
-                {form.img.map((src, i) => (
-                  <span key={`${src}-${i}`} className="img-strip-item">
-                    <img src={resolveImg(src)} alt="" />
-                    {i === 0 && <span className="badge success img-strip-cover">Cover</span>}
-                    <button type="button" className="img-strip-rm" aria-label="Remove photo" onClick={() => removeImage(i)}>
-                      <Icon name="x" className="icon icon-sm" />
-                    </button>
-                    <span className="img-strip-move">
-                      <button type="button" aria-label="Move left" disabled={i === 0} onClick={() => moveImage(i, -1)}>
-                        <Icon name="cleft" className="icon icon-sm" />
-                      </button>
-                      <button type="button" aria-label="Move right" disabled={i === form.img.length - 1} onClick={() => moveImage(i, 1)}>
-                        <Icon name="cright" className="icon icon-sm" />
-                      </button>
-                    </span>
-                  </span>
-                ))}
-              </div>
-            )}
-            <label className={`dropzone img-field-drop ${uploading ? 'busy' : ''}`}>
-              {uploading ? 'Uploading…' : form.img.length ? 'Add more photos' : 'Click to upload photos'}
-              <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple className="sr-only" onChange={handleFile} disabled={uploading} />
-            </label>
-            <span className="field-hint">The first photo is the cover used everywhere on the site — use the arrows to change the order.</span>
-          </div>
-          <div className="field">
-            <label>Name *</label>
-            <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Belgian Chocolate Truffle" aria-invalid={!!errors.name} />
-            {err('name')}
-          </div>
-          <div className="form-grid two">
-            <div className="field">
-              <label>Category *</label>
-              <select className="select" value={form.cat} onChange={(e) => setForm({ ...form, cat: e.target.value })} aria-invalid={!!errors.cat}>
-                {!form.cat && <option value="">Choose…</option>}
-                {form.cat && !catByName.has(form.cat) && <option value={form.cat}>{form.cat} (missing)</option>}
-                {categories.map((c) => (
-                  <option key={c._id} value={c.name}>{c.name}{c.active ? '' : ' (hidden)'}</option>
-                ))}
-              </select>
-              {err('cat')}
-              {catByName.get(form.cat) && !catByName.get(form.cat).active && <span className="field-hint">This category is hidden, so the cake won&rsquo;t show in its menu until the category is shown again.</span>}
-            </div>
-            <div className="field">
-              <label>Flavour</label>
-              <input className="input" list="cake-flavours" value={form.flavour} onChange={(e) => setForm({ ...form, flavour: e.target.value })} placeholder="Pick or type, e.g. Belgian Chocolate" />
-              <datalist id="cake-flavours">
-                {flavours.map((f) => <option key={f} value={f} />)}
-              </datalist>
-            </div>
-            <div className="field">
-              <label>{isBoxCat ? 'Price (per box) *' : 'Base price (0.5 KG) *'}</label>
-              <input className="input" type="number" min="0" inputMode="decimal" value={form.base} onChange={(e) => setForm({ ...form, base: e.target.value })} placeholder="e.g. 649" aria-invalid={!!errors.base} />
-              {err('base')}
-            </div>
-            <div className="field">
-              <label>Quantity in stock *</label>
-              <input className="input" type="number" min="0" step="1" inputMode="numeric" value={form.qty} onChange={(e) => setForm({ ...form, qty: e.target.value })} aria-invalid={!!errors.qty} />
-              {err('qty')}
-              <span className="field-hint">
-                Status: <span className={`badge ${stockTone(derivedStock)}`}>{derivedStock}</span> &mdash; set automatically (0 = out, 1–6 = low, 7+ = in stock).
-              </span>
-            </div>
-            <div className="field span2">
-              <label>Tag (optional)</label>
-              <input className="input" value={form.tag} onChange={(e) => setForm({ ...form, tag: e.target.value })} placeholder="Bestseller, New..." />
-            </div>
-          </div>
-
-          {isBoxCat ? (
-            <div className="field">
-              <label>Pricing</label>
-              <p className="field-hint">&ldquo;{form.cat}&rdquo; is sold as a box: customers pay the single price above and don&rsquo;t pick a weight.</p>
-            </div>
-          ) : (
-            <div className="field">
-              <label>Pricing by weight</label>
-              <div className="weight-price-grid">
-                <div className="weight-price-row">
-                  <span className="w-lab">0.5 KG</span>
-                  <span className="w-val">{money(Number(form.base) || 0)}</span>
-                  <span className="tiny muted">Base price, set above</span>
+            <Card flush className="u-x-mintable">
+              <div className="u-dt-toolbar">
+                <div className="u-dt-search">
+                  <Input icon="search" placeholder="Search name, flavour, category…" value={q} onChange={(e) => setQ(e.target.value)} />
                 </div>
-                {WEIGHT_TIERS.map((t) => (
-                  <div key={t.w}>
-                    <div className="weight-price-row">
-                      <span className="w-lab">{t.w}</span>
-                      <input
-                        className="input"
-                        type="number"
-                        min="0"
-                        inputMode="decimal"
-                        value={form.weights[t.w]}
-                        onChange={(e) => setForm({ ...form, weights: { ...form.weights, [t.w]: e.target.value } })}
-                        placeholder={String(autoPrice(form.base, t.mult))}
-                        aria-invalid={!!errors[`w:${t.w}`]}
-                      />
-                      {form.weights[t.w] === '' ? (
-                        <span className="tiny muted">Auto &middot; {money(autoPrice(form.base, t.mult))}</span>
-                      ) : (
-                        <button type="button" className="tiny link-underline" onClick={() => setForm({ ...form, weights: { ...form.weights, [t.w]: '' } })}>
-                          Reset to auto
-                        </button>
-                      )}
-                    </div>
-                    {err(`w:${t.w}`)}
-                  </div>
-                ))}
-                {form.extraWeights.map((x, i) => (
-                  <div key={i}>
-                    <div className="weight-price-row extra">
-                      <input className="input" value={x.w} onChange={(e) => setExtra(i, { w: e.target.value })} placeholder="e.g. 3 KG" aria-label="Weight label" aria-invalid={!!errors[`x:${i}`]} />
-                      <input className="input" type="number" min="0" inputMode="decimal" value={x.price} onChange={(e) => setExtra(i, { price: e.target.value })} placeholder="Price" aria-label="Price" aria-invalid={!!errors[`x:${i}`]} />
-                      <button type="button" className="tiny link-underline" onClick={() => removeExtra(i)}>Remove</button>
-                    </div>
-                    {err(`x:${i}`)}
-                  </div>
-                ))}
-                <button type="button" className="btn btn-ghost btn-sm" style={{ alignSelf: 'flex-start' }} onClick={addExtra}>
-                  <Icon name="plus" className="icon icon-sm" />
-                  Add another weight
-                </button>
+                <div className="u-dt-filters">
+                  <Select
+                    aria-label="Category" placeholder="All categories" value={f.cat} onChange={(e) => setF({ ...f, cat: e.target.value })}
+                    options={categories.map((c) => ({ value: c.name, label: `${c.name}${c.active ? '' : ' (hidden)'}` }))}
+                  />
+                  <Select aria-label="Stock" placeholder="Any stock" value={f.stock} onChange={(e) => setF({ ...f, stock: e.target.value })} options={['In stock', 'Low stock', 'Out of stock']} />
+                  <Select aria-label="Tag" placeholder="Any tag" value={f.tag} onChange={(e) => setF({ ...f, tag: e.target.value })} options={[...tags, { value: '__none', label: 'No tag' }]} />
+                  <Select aria-label="Egg" placeholder="Egg / eggless" value={f.eggless} onChange={(e) => setF({ ...f, eggless: e.target.value })} options={[{ value: 'yes', label: 'Eggless only' }, { value: 'no', label: 'Contains egg' }]} />
+                  <Select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value)} options={SORTS.map((s) => ({ value: s.value, label: `Sort: ${s.label}` }))} />
+                </div>
+                {activeFilters > 0 && <Button variant="ghost" size="sm" onClick={clear}>Clear</Button>}
+                <div className="u-dt-actions">
+                  <Segmented value={view} onChange={setView} items={[{ value: 'table', label: 'Table' }, { value: 'grid', label: 'Grid' }]} />
+                  <Button size="sm" icon="download" onClick={exportCsv} disabled={!filtered.length}>Export</Button>
+                </div>
               </div>
-              <span className="field-hint">Leave 1 / 1.5 / 2 KG blank to auto-price them from the base price, or type a price to override. Extra weights (e.g. 3 KG) show as additional options with exactly the price you set.</span>
-            </div>
-          )}
 
-          <div className="field">
-            <label>Description</label>
-            <textarea
-              className="textarea"
-              rows={3}
-              value={form.desc}
-              onChange={(e) => setForm({ ...form, desc: e.target.value })}
-              placeholder="Shown on the cake's product page, e.g. Layers of dark chocolate sponge soaked in cocoa syrup…"
-            />
+              {products.length === 0 ? (
+                <div className="u-dt-empty">
+                  <EmptyState icon="cake" title="No cakes on the menu yet" actions={<Button variant="primary" icon="plus" onClick={() => navigate('/cakes/new')}>Add your first cake</Button>}>
+                    Cakes you add here appear in the shop under their category, with photos, weights and prices.
+                  </EmptyState>
+                </div>
+              ) : filtered.length === 0 ? (
+                <div className="u-dt-empty">
+                  <EmptyState icon="search" title="No cakes match" actions={<Button size="sm" onClick={clear}>Clear filters</Button>}>
+                    Try a different search, or clear the filters to see all {products.length} cakes.
+                  </EmptyState>
+                </div>
+              ) : view === 'table' ? (
+                <DataTable
+                  key={sort}
+                  rows={filtered}
+                  columns={columns}
+                  onRowClick={(p) => navigate(`/cakes/${p._id}`)}
+                  highlight={(p) => p.stock === 'Out of stock'}
+                  rowActions={rowActions}
+                  pageSize={15}
+                />
+              ) : (
+                <>
+                  <div className="u-x-cakegrid">
+                    {filtered.map((p) => (
+                      <article key={p._id} className="u-x-cakecard" onClick={() => navigate(`/cakes/${p._id}`)} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && navigate(`/cakes/${p._id}`)}>
+                        <div className="u-x-cakecard-img">
+                          {p.img?.[0] ? <img src={resolveImg(p.img[0])} alt="" loading="lazy" /> : <Icon name="cake" />}
+                          <div className="u-x-cakecard-top">
+                            <Status size="sm">{p.stock}</Status>
+                            <Menu items={rowActions(p)} />
+                          </div>
+                        </div>
+                        <div className="u-x-cakecard-body">
+                          <span className="u-row between" style={{ gap: 6 }}>
+                            <span className="u-xs u-muted">{p.cat}{catByName.get(p.cat) && !catByName.get(p.cat).active ? ' · hidden' : ''}</span>
+                            {p.tag && <Tag>{p.tag}</Tag>}
+                          </span>
+                          <b className="name">{p.name}</b>
+                          <span className="u-row" style={{ gap: 6 }}><Stars rating={p.rating} size="sm" /><span className="u-xs u-muted">{p.rating || 0} ({p.reviews || 0})</span></span>
+                          <div className="u-x-cakecard-meta">
+                            <b className="u-strong u-num" style={{ fontSize: 15 }}>{money(p.base)}<span className="u-xs u-muted" style={{ fontWeight: 500 }}> {isBox(p) ? '/box' : '/0.5 KG'}</span></b>
+                            <span className="u-num">{p.qty ?? 0} left · {p.sold || 0} sold</span>
+                          </div>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                  <div className="u-dt-foot"><span>Showing <b className="u-strong">{filtered.length}</b> of <b className="u-strong">{products.length}</b> cakes</span></div>
+                </>
+              )}
+            </Card>
           </div>
-          <div className="form-grid two">
-            <label className="check">
-              <input type="checkbox" checked={form.eggless} onChange={(e) => setForm({ ...form, eggless: e.target.checked })} />
-              Eggless
-            </label>
-            <label className="check">
-              <input type="checkbox" checked={form.veg} onChange={(e) => setForm({ ...form, veg: e.target.checked })} />
-              Pure veg
-            </label>
-            <label className="check span2">
-              <input type="checkbox" checked={form.corporate} onChange={(e) => setForm({ ...form, corporate: e.target.checked })} />
-              Show in Corporate Cakes (bulk/office gifting page)
-            </label>
-          </div>
-          <button type="submit" hidden />
-        </form>
-      </Modal>
-
-      <Modal
-        open={!!deleting}
-        onClose={() => !removing && setDeleting(null)}
-        kicker="Confirm"
-        title={`Delete ${deleting?.name}?`}
-        foot={
-          <>
-            <button className="btn btn-ghost" onClick={() => setDeleting(null)} disabled={removing}>Cancel</button>
-            <button className="btn btn-primary" style={{ background: 'var(--c-error)' }} onClick={confirmDelete} disabled={removing}>{removing ? 'Deleting…' : 'Delete'}</button>
-          </>
-        }
-      >
-        <p className="muted">This removes the cake from the live menu. This can&rsquo;t be undone.</p>
-      </Modal>
-    </div>
+        )}
+      </Loader>
+    </Page>
   );
 }

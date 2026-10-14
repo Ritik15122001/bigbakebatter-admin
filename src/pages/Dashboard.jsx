@@ -1,259 +1,192 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Icon from '../components/common/Icon';
-import EmptyState from '../components/common/EmptyState';
+import {
+  Page, Card, Stat, Button, Status, Cell, DataTable, AreaChart, BarList, SegmentBar, Segmented,
+  EmptyState, Loader, useAsync,
+} from '../ui';
 import { dashboardService } from '../services/dashboardService';
-import { transactionService } from '../services/transactionService';
-import { money, fmtTime } from '../utils/format';
+import { useAuthStore } from '../store/authStore';
+import { money, fmtDateShort } from '../utils/format';
 
-const SHORT_STATUS = { 'Out for delivery': 'Delivery' };
-const STATUS_TONE = { Delivered: 'success', Cancelled: 'err', 'Out for delivery': 'gold' };
-const METHOD_ICON = { UPI: 'phone', Card: 'card', 'Net Banking': 'home' };
+const PIPELINE = [
+  ['New', 'blue'], ['Baking', 'amber'], ['Out for delivery', 'violet'], ['Delivered', 'green'], ['Cancelled', 'red'],
+];
 
-const KPI_ICON_TONE = {
-  revenue: { bg: 'var(--c-accent-soft)', color: 'var(--c-accent)' },
-  orders: { bg: '#eef2ff', color: '#4338ca' },
-  aov: { bg: 'var(--c-success-soft)', color: 'var(--c-success)' },
-  enquiries: { bg: 'var(--c-warning-soft)', color: 'var(--c-warning)' },
+const greeting = () => {
+  const h = new Date().getHours();
+  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
 };
+
+const pct = (cur, prev) => (prev > 0 ? ((cur - prev) / prev) * 100 : cur > 0 ? 100 : 0);
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [stats, setStats] = useState(null);
-  const [summary, setSummary] = useState(null);
-  const [error, setError] = useState('');
+  const user = useAuthStore((s) => s.user);
+  const { data, loading, error, reload } = useAsync(dashboardService.getStats);
+  const [range, setRange] = useState(30);
 
-  const load = useCallback(() => {
-    setError('');
-    dashboardService.getStats().then(setStats).catch((e) => setError(e.message));
-    transactionService.summary().then(setSummary).catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  if (error) {
-    return (
-      <div className="a-panel a-empty">
-        <p className="muted">Could not load the dashboard: {error}</p>
-        <button className="btn btn-outline btn-sm" onClick={load}>Try again</button>
-      </div>
-    );
-  }
-  if (!stats) return <div className="a-panel a-empty"><p className="muted">Loading dashboard…</p></div>;
-
-  const { totalRevenue = 0, totalOrders = 0, aov = 0, pendingEnquiries = [], lowStock = [], topSelling = [], recentOrders = [] } = stats;
-  const maxDaily = Math.max(1, ...(summary?.daily || []).map((d) => d.revenue));
-  const todayLabel = new Date().toLocaleDateString('en-GB', { weekday: 'short' });
+  const first = (user?.name || 'there').split(' ')[0];
+  const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
 
   return (
-    <>
-      <div className="kpi-grid">
-        <button className="kpi clickable" onClick={() => navigate('/transactions')}>
-          <span className="kico" style={{ background: KPI_ICON_TONE.revenue.bg, color: KPI_ICON_TONE.revenue.color }}>
-            <Icon name="percent" className="icon icon-sm" />
-          </span>
-          <div className="kv">{money(totalRevenue)}</div>
-          <div className="kl">Total revenue</div>
-          <Icon name="aright" className="icon icon-sm kgo" />
-        </button>
-        <button className="kpi clickable" onClick={() => navigate('/orders')}>
-          <span className="kico" style={{ background: KPI_ICON_TONE.orders.bg, color: KPI_ICON_TONE.orders.color }}>
-            <Icon name="bag" className="icon icon-sm" />
-          </span>
-          <div className="kv">{totalOrders}</div>
-          <div className="kl">Total orders</div>
-          <Icon name="aright" className="icon icon-sm kgo" />
-        </button>
-        <button className="kpi clickable" onClick={() => navigate('/transactions')}>
-          <span className="kico" style={{ background: KPI_ICON_TONE.aov.bg, color: KPI_ICON_TONE.aov.color }}>
-            <Icon name="gift" className="icon icon-sm" />
-          </span>
-          <div className="kv">{money(aov)}</div>
-          <div className="kl">Average order value</div>
-          <Icon name="aright" className="icon icon-sm kgo" />
-        </button>
-        <button className="kpi clickable" onClick={() => navigate('/enquiries')}>
-          <span className="kico" style={{ background: KPI_ICON_TONE.enquiries.bg, color: KPI_ICON_TONE.enquiries.color }}>
-            <Icon name="msg" className="icon icon-sm" />
-          </span>
-          <div className="kv">{pendingEnquiries.length}</div>
-          <div className="kl">Pending custom enquiries</div>
-          <Icon name="aright" className="icon icon-sm kgo" />
-        </button>
+    <Page
+      title={`${greeting()}, ${first}`}
+      description={`Here's what's happening at BigBakeBatter today — ${today}.`}
+      actions={
+        <>
+          <Button icon="refresh" onClick={reload} loading={loading && !!data}>Refresh</Button>
+          <Button variant="primary" icon="plus" onClick={() => navigate('/cakes/new')}>Add cake</Button>
+        </>
+      }
+    >
+      <Loader loading={loading && !data} error={!data ? error : ''} onRetry={reload} rows={6}>
+        {data && <DashboardBody data={data} range={range} setRange={setRange} />}
+      </Loader>
+    </Page>
+  );
+}
+
+function DashboardBody({ data, range, setRange }) {
+  const navigate = useNavigate();
+  const series = data.series || [];
+  const last14 = series.slice(-14);
+  const ordersLast30 = series.reduce((s, d) => s + d.orders, 0);
+  const ordersPrev = series.slice(-14, -7).reduce((s, d) => s + d.orders, 0);
+  const ordersCur = series.slice(-7).reduce((s, d) => s + d.orders, 0);
+  const shown = series.slice(-range);
+  const rangeRevenue = shown.reduce((s, d) => s + d.revenue, 0);
+  const statusItems = PIPELINE.map(([label, tone]) => ({ label, tone, value: data.statusCounts?.[label] || 0 }));
+
+  return (
+    <div className="u-stack">
+      <div className="u-grid cols-4">
+        <Stat
+          label="Revenue · last 7 days" icon="rupee" tone="brand"
+          value={money(data.revenue7 || 0)} delta={pct(data.revenue7, data.revenuePrev7)} note="vs previous 7 days"
+          trend={last14.map((d) => d.revenue)} onClick={() => navigate('/transactions')}
+        />
+        <Stat
+          label="Orders · last 30 days" icon="bag" tone="blue"
+          value={ordersLast30} delta={pct(ordersCur, ordersPrev)} note={`${data.activeOrders} in progress`}
+          trend={last14.map((d) => d.orders)} onClick={() => navigate('/orders')}
+        />
+        <Stat label="Average order value" icon="trend" tone="green" value={money(data.aov || 0)} note={`${data.totalOrders} orders all-time`} onClick={() => navigate('/transactions')} />
+        <Stat
+          label="Customers" icon="users" tone="violet" value={data.customers ?? 0}
+          note={`+${data.newCustomers30 || 0} new this month · ${data.subscribers || 0} subscribers`}
+          onClick={() => navigate('/customers')}
+        />
       </div>
 
-      {/* Two independent columns so a tall panel never leaves a gap beside a short one. */}
-      <div className="a-grid-2">
-        <div className="stack gap-5">
-          <div className="a-panel">
-            <div className="a-panel-head">
-              <h3>Revenue, last 7 days</h3>
-              <button className="btn btn-outline btn-sm" onClick={() => navigate('/transactions')}>Finance</button>
+      <div className="u-grid main-side">
+        <Card
+          title="Revenue"
+          subtitle={`${money(rangeRevenue)} from completed and active orders in the last ${range} days`}
+          actions={<Segmented value={range} onChange={setRange} items={[{ value: 7, label: '7 days' }, { value: 14, label: '14 days' }, { value: 30, label: '30 days' }]} />}
+        >
+          <AreaChart
+            height={260}
+            format={money}
+            data={shown.map((d) => ({ label: fmtDateShort(new Date(d.date)), value: d.revenue, sub: `${d.orders} order${d.orders === 1 ? '' : 's'}` }))}
+          />
+        </Card>
+
+        <Card
+          title="Today's deliveries"
+          subtitle={data.todayLabel}
+          flush
+          actions={<Status tone={data.todayDeliveries.length ? 'brand' : 'gray'} plain>{data.todayDeliveries.length}</Status>}
+          footer={
+            <>
+              <span className="u-small">Tomorrow: <b className="u-strong">{data.tomorrowDeliveries.length}</b> order{data.tomorrowDeliveries.length === 1 ? '' : 's'}</span>
+              <button className="u-link u-small" onClick={() => navigate('/orders')}>All orders <Icon name="aright" /></button>
+            </>
+          }
+        >
+          {data.todayDeliveries.length === 0 ? (
+            <EmptyState icon="truck" title="Nothing to deliver today">Orders scheduled for today will appear here with their slot.</EmptyState>
+          ) : (
+            <div className="u-list" style={{ maxHeight: 300, overflowY: 'auto' }}>
+              {data.todayDeliveries.map((o) => (
+                <div key={o._id} className="u-list-item clickable" onClick={() => navigate(`/orders/${o._id}`)}>
+                  <Cell avatar={o.customer} title={o.customer} sub={`${o.code} · ${o.slot || 'Any time'}`} />
+                  <span className="u-spacer" />
+                  <Status size="sm">{o.status}</Status>
+                </div>
+              ))}
             </div>
-            {summary ? (
-              <div className="fin-chart">
-                {summary.daily.map((d) => (
-                  <div className={`fbar ${d.revenue === 0 ? 'zero' : ''} ${d.label === todayLabel ? 'on' : ''}`} key={d.date}>
-                    <span className="fval">{d.revenue > 0 ? money(d.revenue) : ''}</span>
-                    <span className="ftrack">
-                      <span className="ffill" style={{ height: `${Math.max(4, (d.revenue / maxDaily) * 100)}%` }} />
-                    </span>
-                    <span className="flab">
-                      <b>{d.label}</b>
-                      <span>{d.count}</span>
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="a-empty small"><p className="muted">Loading…</p></div>
-            )}
-          </div>
-          <div className="a-panel">
-            <div className="a-panel-head">
-              <h3>Top selling cakes</h3>
-            </div>
-            {topSelling.length === 0 ? (
-              <EmptyState small icon="cake" title="No sales yet" />
-            ) : (
-              <div className="a-table-wrap">
-                <table className="tbl tbl-mini">
-                  <thead>
-                    <tr><th>Cake</th><th>Sold</th><th>Revenue</th></tr>
-                  </thead>
-                  <tbody>
-                    {topSelling.map((p) => (
-                      <tr key={p._id} onClick={() => navigate('/cakes')}>
-                        <td>
-                          <span className="cell-main">{p.name}</span>
-                          <span className="cell-sub">{p.cat}</span>
-                        </td>
-                        <td>{p.sold}</td>
-                        <td>{money(p.sold * p.base)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-          <div className="a-panel">
-            <div className="a-panel-head">
-              <h3>Low stock</h3>
-              <button className="btn btn-outline btn-sm" onClick={() => navigate('/stock')}>Manage</button>
-            </div>
-            {lowStock.length === 0 ? (
-              <EmptyState small icon="check" title="All cakes are well stocked" />
-            ) : (
-              <div className="stack gap-3" style={{ padding: 'var(--s-5)' }}>
-                {lowStock.map((p) => (
-                  <div className="row between center" key={p._id}>
-                    <span className="small">{p.name}</span>
-                    <span className={`badge ${p.stock === 'Out of stock' ? 'err' : 'warn'}`}>{p.stock === 'Out of stock' ? 'Out' : `${p.qty} left`}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-        <div className="stack gap-5">
-          <div className="a-panel">
-            <div className="a-panel-head">
-              <h3>Recent payments</h3>
-              <button className="btn btn-outline btn-sm" onClick={() => navigate('/transactions')}>View all</button>
-            </div>
-            {summary && summary.recent.length > 0 ? (
-              <div className="a-table-wrap">
-                <table className="tbl tbl-mini">
-                  <thead>
-                    <tr><th>Txn</th><th>Method</th><th>Amount</th></tr>
-                  </thead>
-                  <tbody>
-                    {summary.recent.slice(0, 6).map((t) => (
-                      <tr key={t._id} className={Date.now() - new Date(t.paidAt).getTime() < 5 * 60 * 1000 ? 'row-new' : ''} onClick={() => {
-                        const oid = t.order && typeof t.order === 'object' ? t.order._id : t.order;
-                        navigate(oid ? `/orders/${oid}` : `/transactions?q=${encodeURIComponent(t.txnId)}`);
-                      }}>
-                        <td>
-                          <span className="cell-main">{t.orderCode || t.txnId}</span>
-                          <span className="cell-sub">{fmtTime(t.paidAt)}</span>
-                        </td>
-                        <td>
-                          <span className="row gap-2 center small">
-                            <Icon name={METHOD_ICON[t.method]} className="icon icon-sm" style={{ color: 'var(--c-muted)' }} />
-                            {t.method}
-                          </span>
-                        </td>
-                        <td>
-                          <span className={t.status === 'Refunded' ? 'muted' : 'cell-main'} style={t.status === 'Refunded' ? { textDecoration: 'line-through' } : undefined}>
-                            {money(t.amount)}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <EmptyState small icon="card" title="No payments yet" />
-            )}
-          </div>
-          <div className="a-panel">
-            <div className="a-panel-head">
-              <h3>Recent orders</h3>
-              <button className="btn btn-outline btn-sm" onClick={() => navigate('/orders')}>View all</button>
-            </div>
-            {recentOrders.length === 0 ? (
-              <EmptyState small icon="bag" title="No orders yet" />
-            ) : (
-              <div className="a-table-wrap">
-                <table className="tbl tbl-mini">
-                  <thead>
-                    <tr><th>Order</th><th>Customer</th><th>Status</th></tr>
-                  </thead>
-                  <tbody>
-                    {recentOrders.map((o) => (
-                      <tr key={o._id} className={o.status === 'New' ? 'row-new' : ''} onClick={() => navigate(`/orders/${o._id}`)}>
-                        <td>
-                          <span className="cell-main">{o.code}</span>
-                          <span className="cell-sub">{new Date(o.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</span>
-                        </td>
-                        <td>
-                          <span className="cell-main">{o.customer}</span>
-                          <span className="cell-sub">{money(o.amount)}</span>
-                        </td>
-                        <td>
-                          <span className={`badge ${STATUS_TONE[o.status] || 'warn'}`} title={o.status}>{SHORT_STATUS[o.status] || o.status}</span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-          <div className="a-panel">
-            <div className="a-panel-head">
-              <h3>Pending enquiries</h3>
-              <button className="btn btn-outline btn-sm" onClick={() => navigate('/enquiries')}>Manage</button>
-            </div>
-            {pendingEnquiries.length === 0 ? (
-              <EmptyState small icon="msg" title="No new enquiries" />
-            ) : (
-              <div className="stack gap-3" style={{ padding: 'var(--s-5)' }}>
-                {pendingEnquiries.map((e) => (
-                  <div className="row between center" key={e._id}>
-                    <span className="small">{e.name} · {e.occasion}</span>
-                    <span className="badge neutral">{e.code}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
+          )}
+        </Card>
       </div>
-    </>
+
+      <div className="u-grid cols-3">
+        <Card title="Order pipeline" subtitle="Every order by its current status">
+          <div className="u-stack tight">
+            <SegmentBar items={statusItems} />
+            <div className="u-list" style={{ marginInline: -20, marginBottom: -20, marginTop: 8 }}>
+              {statusItems.map((s) => (
+                <div key={s.label} className="u-list-item clickable" onClick={() => navigate(`/orders?status=${encodeURIComponent(s.label)}`)}>
+                  <Status tone={s.tone}>{s.label}</Status>
+                  <span className="u-spacer" />
+                  <b className="u-strong u-num">{s.value}</b>
+                  <Icon name="cright" className="icon u-faint" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+
+        <Card title="Best sellers" subtitle="Most-ordered cakes" actions={<button className="u-link u-small" onClick={() => navigate('/cakes')}>All cakes</button>}>
+          {data.topSelling?.length ? (
+            <BarList items={data.topSelling.map((p) => ({ label: p.name, value: p.sold || 0, display: `${p.sold || 0} sold` }))} />
+          ) : (
+            <EmptyState icon="cake" title="No sales yet" />
+          )}
+        </Card>
+
+        <Card title="Needs attention" subtitle="Stock and enquiries waiting on you" flush>
+          {data.lowStock.length === 0 && data.pendingEnquiries.length === 0 ? (
+            <EmptyState icon="check" title="All clear">Stock is healthy and there are no new enquiries.</EmptyState>
+          ) : (
+            <div className="u-list">
+              {data.pendingEnquiries.slice(0, 4).map((e) => (
+                <div key={e._id} className="u-list-item clickable" onClick={() => navigate(`/enquiries?open=${e._id}`)}>
+                  <span className="u-stat-ico tone-violet" style={{ width: 32, height: 32 }}><Icon name="msg" /></span>
+                  <Cell title={`${e.name} · ${e.occasion}`} sub={`Enquiry ${e.code}`} />
+                  <span className="u-spacer" />
+                  <Status size="sm">New</Status>
+                </div>
+              ))}
+              {data.lowStock.slice(0, 5).map((p) => (
+                <div key={p._id} className="u-list-item clickable" onClick={() => navigate('/stock')}>
+                  <span className={`u-stat-ico ${p.stock === 'Out of stock' ? 'tone-red' : 'tone-amber'}`} style={{ width: 32, height: 32 }}><Icon name="pkg" /></span>
+                  <Cell title={p.name} sub={p.stock === 'Out of stock' ? 'Out of stock' : `Only ${p.qty} left`} />
+                  <span className="u-spacer" />
+                  <Status size="sm">{p.stock}</Status>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      <Card title="Latest orders" subtitle="The six most recent orders" flush actions={<Button size="sm" iconRight="aright" onClick={() => navigate('/orders')}>View all orders</Button>}>
+        <DataTable
+          rows={data.recentOrders}
+          onRowClick={(o) => navigate(`/orders/${o._id}`)}
+          highlight={(o) => o.status === 'New'}
+          pageSize={6}
+          columns={[
+            { key: 'code', header: 'Order', render: (o) => <Cell title={o.code} sub={new Date(o.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true })} /> },
+            { key: 'customer', header: 'Customer', render: (o) => <Cell avatar={o.customer} title={o.customer} sub={o.phone} /> },
+            { key: 'items', header: 'Items', render: (o) => <span className="u-small">{o.items.map((i) => `${i.name}${i.qty > 1 ? ` ×${i.qty}` : ''}`).join(', ')}</span> },
+            { key: 'deliver', header: 'Delivery', render: (o) => <Cell title={o.deliver || '—'} sub={o.slot} /> },
+            { key: 'amount', header: 'Amount', align: 'right', render: (o) => <b className="u-strong u-num">{money(o.amount)}</b> },
+            { key: 'status', header: 'Status', shrink: true, render: (o) => <Status>{o.status}</Status> },
+          ]}
+        />
+      </Card>
+    </div>
   );
 }

@@ -1,306 +1,353 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import Icon from '../components/common/Icon';
-import Modal from '../components/common/Modal';
-import { categoryService } from '../services/catalogService';
+import {
+  Page, Card, Stat, Button, Status, Cell, DataTable, Tabs, Drawer, Field, Input, Switch, Alert, Menu, EmptyState,
+  Loader, useAsync, useConfirm, toast, downloadCsv,
+} from '../ui';
+import { IconGrid, QtyStepper } from '../ui/ext-cat';
+import { categoryService, occasionService } from '../services/catalogService';
 import { productService } from '../services/productService';
-import { useUiStore } from '../store/uiStore';
-import IconPicker from '../components/common/IconPicker';
-import { CATEGORY_ICONS } from '../utils/icons';
-import { stockFromQty, stockTone } from '../utils/stock';
+import { PICKABLE_ICONS } from '../utils/icons';
+import { stockFromQty } from '../utils/stock';
+import { fmtDate } from '../utils/format';
 
-const EMPTY_CAT = { name: '', icon: 'cake', isBox: false, order: 0 };
 const byOrderThenName = (a, b) => (a.order ?? 0) - (b.order ?? 0) || a.name.localeCompare(b.name);
+const loadAll = () =>
+  Promise.all([categoryService.list(), productService.list(), occasionService.list().catch(() => [])])
+    .then(([categories, products, occasions]) => ({ categories, products, occasions }));
+const TONES = ['brand', 'green', 'amber', 'blue', 'violet', 'red'];
 
 export default function CategoriesStock() {
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') === 'stock' ? 'stock' : 'categories';
+  const setTab = (t) => setParams(t === 'categories' ? {} : { tab: t }, { replace: true });
+  const { data, setData, loading, error, reload } = useAsync(loadAll);
+
+  const lowCount = (data?.products || []).filter((p) => p.stock !== 'In stock').length;
+
+  return (
+    <Page
+      title="Categories & stock"
+      description="Organise the menu into categories and keep quantities up to date. Stock status follows the quantity automatically."
+      tabs={
+        <Tabs
+          value={tab}
+          onChange={setTab}
+          items={[
+            { value: 'categories', label: 'Categories', icon: 'grid', count: data?.categories.length },
+            { value: 'stock', label: 'Stock levels', icon: 'pkg', count: data ? lowCount || undefined : undefined },
+          ]}
+        />
+      }
+    >
+      <Loader loading={loading && !data} error={!data ? error : ''} onRetry={reload} rows={6}>
+        {data && (tab === 'categories' ? <CategoriesTab data={data} setData={setData} reload={reload} /> : <StockTab data={data} setData={setData} />)}
+      </Loader>
+    </Page>
+  );
+}
+
+/* ====================== Categories ====================== */
+function CategoriesTab({ data, setData, reload }) {
   const navigate = useNavigate();
-  const pushToast = useUiStore((s) => s.pushToast);
-  const [categories, setCategories] = useState([]);
-  const [stock, setStock] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
-  const [editing, setEditing] = useState(null); // 'new' | category id
-  const [form, setForm] = useState(EMPTY_CAT);
-  const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(null);
-  const [removing, setRemoving] = useState(false);
-  const [qtyDraft, setQtyDraft] = useState({}); // productId -> string being typed
-  const [busyIds, setBusyIds] = useState({});
-  const [savedIds, setSavedIds] = useState({}); // productId -> true for a moment after a save
-  const [stockQ, setStockQ] = useState('');
+  const confirm = useConfirm();
+  const [q, setQ] = useState('');
+  const [editing, setEditing] = useState(null); // null | 'new' | category
+  const categories = useMemo(() => [...data.categories].sort(byOrderThenName), [data.categories]);
+  const countFor = (name) => data.products.filter((p) => p.cat === name).length;
+  const occFor = (name) => data.occasions.filter((o) => o.cat === name).length;
+  const shown = categories.filter((c) => !q.trim() || c.name.toLowerCase().includes(q.trim().toLowerCase()));
 
-  const load = useCallback(() => {
-    setLoading(true);
-    setLoadError('');
-    Promise.all([categoryService.list(), productService.list()])
-      .then(([cats, products]) => {
-        setCategories([...cats].sort(byOrderThenName));
-        setStock(products);
-      })
-      .catch((e) => setLoadError(e.message))
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const toggleActive = async (cat) => {
+  const toggleActive = async (c, active) => {
+    setData((d) => ({ ...d, categories: d.categories.map((x) => (x._id === c._id ? { ...x, active } : x)) }));
     try {
-      await categoryService.update(cat._id, { active: !cat.active });
-      setCategories((prev) => prev.map((c) => (c._id === cat._id ? { ...c, active: !c.active } : c)));
-    } catch (e) {
-      pushToast({ title: 'Could not update category', subtitle: e.message, kind: 'err' });
+      await categoryService.update(c._id, { active });
+      toast.success(active ? 'Category visible' : 'Category hidden', active ? `${c.name} shows in the shop menus again.` : `${c.name} and its cakes are hidden from the shop menus.`);
+    } catch (err) {
+      setData((d) => ({ ...d, categories: d.categories.map((x) => (x._id === c._id ? { ...x, active: c.active } : x)) }));
+      toast.error('Could not update category', err.message);
     }
   };
 
-  const openAdd = () => {
-    setForm({ ...EMPTY_CAT, order: categories.length });
-    setEditing('new');
-  };
-  const openEdit = (c) => {
-    setForm({ name: c.name, icon: c.icon || 'cake', isBox: !!c.isBox, order: c.order ?? 0 });
-    setEditing(c._id);
+  const remove = async (c) => {
+    const n = countFor(c.name);
+    const ok = await confirm({
+      title: `Delete “${c.name}”?`,
+      message: n
+        ? `${n} cake${n === 1 ? ' is' : 's are'} still in this category, so the server will refuse. Move or delete them first — or hide the category instead.`
+        : 'This removes the category from the shop menus. It can only be deleted when no cakes or occasions use it.',
+      confirmLabel: 'Delete category',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await categoryService.remove(c._id);
+      setData((d) => ({ ...d, categories: d.categories.filter((x) => x._id !== c._id) }));
+      toast.success('Category deleted', c.name);
+    } catch (err) {
+      toast.error('Can’t delete this category', err.message);
+    }
   };
 
-  const saveCategory = async (e) => {
+  const exportCsv = () => downloadCsv(
+    'categories',
+    ['Name', 'Icon', 'Cakes', 'Occasions', 'Sold as box', 'Visible', 'Position', 'Created'],
+    categories.map((c) => [c.name, c.icon, countFor(c.name), occFor(c.name), c.isBox ? 'Yes' : 'No', c.active ? 'Yes' : 'No', c.order ?? 0, fmtDate(c.createdAt)])
+  );
+
+  return (
+    <div className="u-stack">
+      <Card flush className="u-x-mintable">
+        <div className="u-dt-toolbar" style={{ borderBottom: 0 }}>
+          <div className="u-dt-search"><Input icon="search" placeholder="Search categories…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+          <span className="u-small u-muted">
+            {categories.filter((c) => c.active).length} visible · {categories.filter((c) => !c.active).length} hidden · {categories.filter((c) => c.isBox).length} sold as boxes
+          </span>
+          <div className="u-dt-actions">
+            <Button size="sm" icon="download" onClick={exportCsv} disabled={!categories.length}>Export</Button>
+            <Button size="sm" variant="primary" icon="plus" onClick={() => setEditing('new')}>Add category</Button>
+          </div>
+        </div>
+      </Card>
+
+      {categories.length === 0 ? (
+        <Card>
+          <EmptyState icon="grid" title="No categories yet" actions={<Button variant="primary" icon="plus" onClick={() => setEditing('new')}>Add a category</Button>}>
+            Categories group your cakes in the shop menus and filters — e.g. Birthday, Anniversary, Brownies.
+          </EmptyState>
+        </Card>
+      ) : shown.length === 0 ? (
+        <Card><EmptyState icon="search" title="No categories match" actions={<Button size="sm" onClick={() => setQ('')}>Clear search</Button>}>Nothing is called “{q}”.</EmptyState></Card>
+      ) : (
+        <div className="u-x-catgrid">
+          {shown.map((c, i) => {
+            const n = countFor(c.name);
+            return (
+              <div key={c._id} className={`u-x-catcard${c.active ? '' : ' off'}`} onClick={() => setEditing(c)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setEditing(c)}>
+                <div className="u-x-catcard-head">
+                  <span className={`u-x-catcard-ico tone-${TONES[i % TONES.length]}`}><Icon name={c.icon || 'cake'} /></span>
+                  <div className="u-cell-text" style={{ flex: 1 }}>
+                    <b style={{ fontSize: 15 }}>{c.name}</b>
+                    <span>{n} cake{n === 1 ? '' : 's'} · position {c.order ?? 0}</span>
+                  </div>
+                  <Menu items={[
+                    { label: 'Edit', icon: 'edit', onClick: () => setEditing(c) },
+                    { label: 'Add a cake here', icon: 'plus', onClick: () => navigate(`/cakes/new?cat=${encodeURIComponent(c.name)}`) },
+                    { label: 'Show its stock', icon: 'pkg', onClick: () => navigate(`/stock?tab=stock&cat=${encodeURIComponent(c.name)}`) },
+                    { divider: true },
+                    { label: 'Delete', icon: 'trash', danger: true, onClick: () => remove(c) },
+                  ]} />
+                </div>
+                <div className="u-row" style={{ gap: 6 }}>
+                  <Status size="sm" tone={c.isBox ? 'violet' : 'blue'} plain>{c.isBox ? 'Sold as box' : 'Sold by weight'}</Status>
+                  {!c.active && <Status size="sm">Hidden</Status>}
+                  {occFor(c.name) > 0 && <Status size="sm" tone="gray" plain>{occFor(c.name)} occasion{occFor(c.name) === 1 ? '' : 's'}</Status>}
+                </div>
+                <div className="u-x-catcard-foot" onClick={(e) => e.stopPropagation()}>
+                  <Switch checked={c.active} onChange={(v) => toggleActive(c, v)} label={c.active ? 'Visible' : 'Hidden'} />
+                  <Button size="sm" variant="ghost" icon="plus" onClick={() => navigate(`/cakes/new?cat=${encodeURIComponent(c.name)}`)}>Add cake</Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {editing && (
+        <CategoryDrawer
+          category={editing === 'new' ? null : editing}
+          nextOrder={categories.length}
+          cakeCount={editing === 'new' ? 0 : countFor(editing.name)}
+          occasionCount={editing === 'new' ? 0 : occFor(editing.name)}
+          onClose={() => setEditing(null)}
+          onDelete={editing === 'new' ? null : () => { setEditing(null); remove(editing); }}
+          onSaved={() => { setEditing(null); reload(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function CategoryDrawer({ category, nextOrder, cakeCount, occasionCount, onClose, onSaved, onDelete }) {
+  const [form, setForm] = useState(() => ({
+    name: category?.name || '', icon: category?.icon || 'cake', isBox: !!category?.isBox,
+    order: String(category?.order ?? nextOrder), active: category ? category.active !== false : true,
+  }));
+  const [errors, setErrors] = useState({});
+  const [saving, setSaving] = useState(false);
+  const set = (patch) => { setForm((f) => ({ ...f, ...patch })); setErrors({}); };
+  const renamed = category && form.name.trim() && form.name.trim() !== category.name;
+
+  const save = async (e) => {
     e?.preventDefault();
-    if (saving) return;
     const name = form.name.trim();
-    if (!name) {
-      pushToast({ title: 'Category name is required', kind: 'err' });
-      return;
-    }
-    const payload = { name, icon: form.icon, isBox: !!form.isBox, order: Number(form.order) || 0 };
+    const errs = {};
+    if (!name) errs.name = 'Enter a category name.';
+    else if (name.length > 60) errs.name = 'Keep it under 60 characters.';
+    if (form.order !== '' && !Number.isFinite(Number(form.order))) errs.order = 'Enter a number.';
+    setErrors(errs);
+    if (Object.keys(errs).length) return;
+    const payload = { name, icon: form.icon, isBox: form.isBox, order: Number(form.order) || 0, active: form.active };
     setSaving(true);
     try {
-      if (editing === 'new') await categoryService.create(payload);
-      else await categoryService.update(editing, payload);
-      pushToast({ title: editing === 'new' ? 'Category added' : 'Category updated', kind: 'ok' });
-      setEditing(null);
-      load();
+      if (category) await categoryService.update(category._id, payload);
+      else await categoryService.create(payload);
+      toast.success(category ? 'Category saved' : 'Category added', renamed ? `Renamed to ${name} — ${cakeCount} cake${cakeCount === 1 ? '' : 's'} moved with it.` : name);
+      onSaved();
     } catch (err) {
-      pushToast({ title: 'Could not save category', subtitle: err.message, kind: 'err' });
+      if (err.status === 409) setErrors({ name: err.message });
+      toast.error('Could not save category', err.message);
     } finally {
       setSaving(false);
     }
   };
 
-  const confirmDelete = async () => {
-    setRemoving(true);
+  return (
+    <Drawer
+      open
+      onClose={onClose}
+      title={category ? `Edit “${category.name}”` : 'Add a category'}
+      description={category ? `${cakeCount} cake${cakeCount === 1 ? '' : 's'}${occasionCount ? ` · ${occasionCount} occasion${occasionCount === 1 ? '' : 's'}` : ''} · added ${fmtDate(category.createdAt)}` : 'Categories appear in the shop menus, filters and footer.'}
+      footer={
+        <>
+          {onDelete && <Button variant="danger-soft" icon="trash" onClick={onDelete} disabled={saving}>Delete</Button>}
+          <span className="u-spacer" />
+          <Button onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button type="submit" form="category-form" variant="primary" icon="check" loading={saving}>{category ? 'Save category' : 'Add category'}</Button>
+        </>
+      }
+    >
+      <form id="category-form" className="u-stack" onSubmit={save}>
+        <Field label="Name" required error={errors.name}>
+          {(id) => <Input id={id} value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder="e.g. Birthday" error={errors.name} autoFocus maxLength={60} />}
+        </Field>
+        {renamed && (cakeCount > 0 || occasionCount > 0) && (
+          <Alert tone="amber" icon="alert" title="Renaming moves everything with it">
+            {cakeCount} cake{cakeCount === 1 ? '' : 's'}{occasionCount ? ` and ${occasionCount} occasion${occasionCount === 1 ? '' : 's'}` : ''} in “{category.name}” will be moved to “{form.name.trim()}”. Links to the old category name stop working.
+          </Alert>
+        )}
+        <Field label="Icon" hint="Shown next to the category in the shop menus.">
+          {() => <IconGrid value={form.icon} onChange={(icon) => set({ icon })} options={PICKABLE_ICONS} />}
+        </Field>
+        <Switch
+          checked={form.isBox} onChange={(v) => set({ isBox: v })} label="Sold as a box"
+          description="For brownies, cupcakes, jars… Customers pay one fixed price and don't pick a weight. Cakes in this category hide the 0.5 / 1 / 2 KG options."
+        />
+        <Switch
+          checked={form.active} onChange={(v) => set({ active: v })} label="Visible in the shop"
+          description="Hidden categories (and their cakes) disappear from menus and filters but stay editable here."
+        />
+        <Field label="Position" error={errors.order} hint="Lower numbers show first in menus. Categories with the same number sort A–Z.">
+          {(id) => <Input id={id} type="number" inputMode="numeric" value={form.order} onChange={(e) => set({ order: e.target.value })} style={{ maxWidth: 160 }} error={errors.order} />}
+        </Field>
+      </form>
+    </Drawer>
+  );
+}
+
+/* ====================== Stock levels ====================== */
+function StockTab({ data, setData }) {
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const [busy, setBusy] = useState({});
+  const [saved, setSaved] = useState({});
+  const products = data.products;
+  const categories = useMemo(() => [...data.categories].sort(byOrderThenName), [data.categories]);
+  const presetCat = params.get('cat') || '';
+
+  const setQty = async (p, next) => {
+    const qty = Math.max(0, Math.floor(Number(next)));
+    if (!Number.isFinite(qty) || qty === p.qty) return;
+    setBusy((b) => ({ ...b, [p._id]: true }));
     try {
-      await categoryService.remove(deleting._id);
-      pushToast({ title: 'Category deleted', kind: 'info' });
-      setDeleting(null);
-      load();
+      const updated = await productService.update(p._id, { qty, stock: stockFromQty(qty) });
+      setData((d) => ({ ...d, products: d.products.map((x) => (x._id === p._id ? { ...x, ...updated } : x)) }));
+      setSaved((m) => ({ ...m, [p._id]: true }));
+      setTimeout(() => setSaved((m) => ({ ...m, [p._id]: false })), 1800);
     } catch (err) {
-      setDeleting(null);
-      pushToast({ title: 'Could not delete category', subtitle: err.message, kind: 'err' });
+      toast.error(`Could not update ${p.name}`, err.message);
     } finally {
-      setRemoving(false);
+      setBusy((b) => ({ ...b, [p._id]: false }));
     }
   };
 
-  /** Sets an absolute quantity; status follows the quantity (same rule the server uses for ±). */
-  const setQty = async (product, nextQty) => {
-    const qty = Math.max(0, Math.floor(Number(nextQty)));
-    if (!Number.isFinite(qty)) return;
-    setQtyDraft((d) => { const n = { ...d }; delete n[product._id]; return n; });
-    if (qty === product.qty && stockFromQty(qty) === product.stock) return;
-    setBusyIds((b) => ({ ...b, [product._id]: true }));
+  const syncStatus = async (p) => {
+    setBusy((b) => ({ ...b, [p._id]: true }));
     try {
-      const updated = await productService.update(product._id, { qty, stock: stockFromQty(qty) });
-      setStock((prev) => prev.map((p) => (p._id === product._id ? { ...p, ...updated } : p)));
-      setSavedIds((m) => ({ ...m, [product._id]: true }));
-      setTimeout(() => setSavedIds((m) => { const n = { ...m }; delete n[product._id]; return n; }), 1800);
-    } catch (e) {
-      pushToast({ title: 'Could not update stock', subtitle: e.message, kind: 'err' });
+      const updated = await productService.update(p._id, { qty: p.qty || 0, stock: stockFromQty(p.qty) });
+      setData((d) => ({ ...d, products: d.products.map((x) => (x._id === p._id ? { ...x, ...updated } : x)) }));
+      toast.success('Status updated', `${p.name} is now “${updated.stock}”.`);
+    } catch (err) {
+      toast.error(`Could not update ${p.name}`, err.message);
     } finally {
-      setBusyIds((b) => { const n = { ...b }; delete n[product._id]; return n; });
+      setBusy((b) => ({ ...b, [p._id]: false }));
     }
   };
 
-  if (loading) return <div className="a-panel a-empty"><p className="muted">Loading…</p></div>;
-  if (loadError) {
-    return (
-      <div className="a-panel a-empty">
-        <p className="muted">Could not load categories and stock: {loadError}</p>
-        <button className="btn btn-outline btn-sm" onClick={load}>Try again</button>
-      </div>
-    );
-  }
-
-  const shownStock = stock.filter((p) => `${p.name} ${p.cat}`.toLowerCase().includes(stockQ.trim().toLowerCase()));
+  const units = products.reduce((s, p) => s + (p.qty || 0), 0);
+  const count = (s) => products.filter((p) => p.stock === s).length;
 
   return (
-    <div className="a-grid-2">
-      <div className="a-panel">
-        <div className="a-panel-head">
-          <h3>Categories</h3>
-          <button className="btn btn-primary btn-sm" onClick={openAdd}>
-            <Icon name="plus" className="icon icon-sm" />
-            Add category
-          </button>
-        </div>
-        <div className="a-table-wrap">
-          <table className="tbl tbl-mini">
-            <thead>
-              <tr><th>Category</th><th className="tight">Cakes</th><th className="tight">Shown</th><th className="act" /></tr>
-            </thead>
-            <tbody>
-              {categories.map((c) => (
-                <tr key={c._id} onClick={() => openEdit(c)}>
-                  <td>
-                    <span className="row gap-2 center">
-                      <Icon name={c.icon} className="icon icon-sm" />
-                      <span style={{ minWidth: 0 }}>
-                        <span className="cell-main">{c.name}</span>
-                        <span className="cell-sub">
-                          {[c.isBox ? 'Box · single price' : null, !c.active ? 'Hidden' : null, `#${c.order ?? 0}`].filter(Boolean).join(' · ')}
-                        </span>
-                      </span>
-                    </span>
-                  </td>
-                  <td className="tight">{stock.filter((p) => p.cat === c.name).length}</td>
-                  <td className="tight" onClick={(e) => e.stopPropagation()}>
-                    <label className="check" style={{ display: 'inline-flex' }} title={c.active ? 'Shown on the storefront' : 'Hidden from the storefront'}>
-                      <input type="checkbox" checked={c.active} onChange={() => toggleActive(c)} aria-label={`Show ${c.name} on storefront`} />
-                    </label>
-                  </td>
-                  <td className="act rowact" onClick={(e) => e.stopPropagation()}>
-                    <button className="iconbtn acc" aria-label={`Add a cake to ${c.name}`} title="Add a cake to this category" onClick={() => navigate(`/cakes?new=1&cat=${encodeURIComponent(c.name)}`)}>
-                      <Icon name="plus" className="icon icon-sm" />
-                    </button>
-                    <button className="iconbtn" aria-label="Edit category" onClick={() => openEdit(c)}>
-                      <Icon name="edit" className="icon icon-sm" />
-                    </button>
-                    <button className="iconbtn danger" aria-label="Delete category" onClick={() => setDeleting(c)}>
-                      <Icon name="trash" className="icon icon-sm" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+    <div className="u-stack">
+      <div className="u-grid cols-4 u-x-stats">
+        <Stat label="Units in stock" icon="pkg" tone="brand" value={units} note={`across ${products.length} cakes`} />
+        <Stat label="In stock" icon="check" tone="green" value={count('In stock')} note="7 or more" />
+        <Stat label="Low stock" icon="alert" tone="amber" value={count('Low stock')} note="1–6 left" />
+        <Stat label="Out of stock" icon="ban" tone="red" value={count('Out of stock')} note="Shown as sold out" />
       </div>
-
-      <div className="a-panel">
-        <div className="a-panel-head">
-          <h3>Stock levels</h3>
-          <div className="field" style={{ minWidth: 0, flex: '1 1 160px', maxWidth: 240 }}>
-            <input className="input input-sm" placeholder="Search cakes…" value={stockQ} onChange={(e) => setStockQ(e.target.value)} />
-          </div>
+      <Alert tone="blue" icon="info">
+        Type a quantity and press <b style={{ display: 'inline' }}>Enter</b> (or click away) to save, or use − / +. Status follows the quantity: 0 = Out of stock, 1–6 = Low stock, 7+ = In stock.
+      </Alert>
+      {presetCat && (
+        <div className="u-row">
+          <span className="u-small">Showing only <b className="u-strong">{presetCat}</b></span>
+          <Button size="sm" variant="ghost" icon="x" onClick={() => setParams({ tab: 'stock' }, { replace: true })}>Show all categories</Button>
         </div>
-        <p className="a-intro">Status updates automatically from the quantity: <b>0</b> = Out of stock, <b>1–6</b> = Low stock, <b>7+</b> = In stock. Type a number (Enter to save) or use − / +.</p>
-        <div className="a-table-wrap">
-          <table className="tbl tbl-mini">
-            <thead>
-              <tr><th>Cake</th><th className="tight">Qty</th><th className="tight">Status</th></tr>
-            </thead>
-            <tbody>
-              {shownStock.map((s) => {
-                const busy = !!busyIds[s._id];
-                const draft = qtyDraft[s._id];
+      )}
+      <Card flush className="u-x-mintable">
+        <DataTable
+          key={presetCat}
+          rows={presetCat ? products.filter((p) => p.cat === presetCat) : products}
+          exportName="stock-levels"
+          search={{ placeholder: 'Search cakes…', fields: ['name', 'cat', 'flavour'] }}
+          filters={[
+            !presetCat && { key: 'cat', label: 'All categories', options: categories.map((c) => ({ value: c.name, label: `${c.name}${c.active ? '' : ' (hidden)'}` })) },
+            { key: 'stock', label: 'Any status', options: ['In stock', 'Low stock', 'Out of stock'] },
+          ].filter(Boolean)}
+          initialSort={{ key: 'qty', dir: 'asc' }}
+          highlight={(p) => p.stock === 'Out of stock'}
+          pageSize={20}
+          rowActions={(p) => [
+            { label: 'Edit cake', icon: 'edit', onClick: () => navigate(`/cakes/${p._id}`) },
+            { label: 'Mark out of stock', icon: 'ban', disabled: !p.qty, onClick: () => setQty(p, 0) },
+            { label: 'Add 10', icon: 'plus', onClick: () => setQty(p, (p.qty || 0) + 10) },
+          ]}
+          empty={<EmptyState icon="pkg" title="No cakes yet" actions={<Button variant="primary" icon="plus" onClick={() => navigate('/cakes/new')}>Add a cake</Button>}>Stock levels appear here once you add cakes.</EmptyState>}
+          columns={[
+            { key: 'name', header: 'Cake', sortable: true, render: (p) => <Cell thumb={p.img?.[0] || ''} title={p.name} sub={p.flavour || p.cat} /> },
+            { key: 'cat', header: 'Category', sortable: true },
+            { key: 'qty', header: 'Quantity', sortable: true, sortValue: (p) => p.qty || 0, csv: (p) => p.qty ?? 0, render: (p) => <QtyStepper value={p.qty ?? 0} busy={!!busy[p._id]} saved={!!saved[p._id]} onCommit={(n) => setQty(p, n)} label={`Quantity of ${p.name}`} /> },
+            {
+              key: 'stock', header: 'Status', sortable: true,
+              render: (p) => {
+                const should = stockFromQty(p.qty);
                 return (
-                  <tr key={s._id} style={{ cursor: 'default' }}>
-                    <td className="cell-wrap">
-                      <span className="cell-main">{s.name}</span>
-                      <span className="cell-sub">{s.cat}</span>
-                    </td>
-                    <td className="tight">
-                      <span className="qty-ctl">
-                        <button className="iconbtn" aria-label="Decrease" disabled={busy || s.qty <= 0} onClick={() => setQty(s, (s.qty || 0) - 1)}>
-                          <Icon name="minus" className="icon icon-sm" />
-                        </button>
-                        <input
-                          className="input qty-input"
-                          type="number"
-                          min="0"
-                          step="1"
-                          inputMode="numeric"
-                          aria-label={`Quantity of ${s.name}`}
-                          value={draft ?? String(s.qty ?? 0)}
-                          disabled={busy}
-                          onChange={(e) => setQtyDraft((d) => ({ ...d, [s._id]: e.target.value }))}
-                          onBlur={() => draft !== undefined && draft !== '' && setQty(s, draft)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') e.currentTarget.blur();
-                            if (e.key === 'Escape') setQtyDraft((d) => { const n = { ...d }; delete n[s._id]; return n; });
-                          }}
-                        />
-                        <button className="iconbtn" aria-label="Increase" disabled={busy} onClick={() => setQty(s, (s.qty || 0) + 1)}>
-                          <Icon name="plus" className="icon icon-sm" />
-                        </button>
-                      </span>
-                    </td>
-                    <td className="tight">
-                      <span className="stack gap-1" style={{ alignItems: 'flex-start' }}>
-                        <span className={`badge ${stockTone(s.stock)}`}>{s.stock}</span>
-                        <span className={`qty-saved ${busy ? 'busy' : savedIds[s._id] ? 'on' : ''}`} aria-live="polite">
-                          {busy ? 'Saving…' : savedIds[s._id] ? '✓ Saved' : ''}
-                        </span>
-                      </span>
-                    </td>
-                  </tr>
+                  <span className="u-cell-text" style={{ alignItems: 'flex-start', gap: 3 }}>
+                    <Status>{p.stock}</Status>
+                    {should !== p.stock && (
+                      <button type="button" className="u-link u-xs" onClick={(e) => { e.stopPropagation(); syncStatus(p); }} title="The saved status doesn't match the quantity">
+                        Doesn’t match qty · set to {should}
+                      </button>
+                    )}
+                  </span>
                 );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <Modal
-        open={!!editing}
-        onClose={() => !saving && setEditing(null)}
-        kicker={editing === 'new' ? 'New category' : 'Edit category'}
-        title={editing === 'new' ? 'Add a category' : form.name || 'Category'}
-        foot={<button className="btn btn-primary btn-block" onClick={saveCategory} disabled={saving}>{saving ? 'Saving…' : 'Save category'}</button>}
-      >
-        <form className="stack gap-4" onSubmit={saveCategory}>
-          <div className="field">
-            <label>Name</label>
-            <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Birthday" autoFocus />
-            {editing !== 'new' && <span className="field-hint">Renaming also updates every cake and occasion in this category.</span>}
-          </div>
-          <div className="field">
-            <label>Icon</label>
-            <IconPicker value={form.icon} onChange={(icon) => setForm({ ...form, icon })} options={CATEGORY_ICONS} />
-            <span className="field-hint">Shown next to the category in the shop menus. Hover an icon to see its name.</span>
-          </div>
-          <div className="form-grid two">
-            <div className="field">
-              <label>Position</label>
-              <input className="input" type="number" inputMode="numeric" value={form.order} onChange={(e) => setForm({ ...form, order: e.target.value })} />
-              <span className="field-hint">Lower numbers show first in menus.</span>
-            </div>
-            <div className="field">
-              <label>Pricing</label>
-              <label className="check">
-                <input type="checkbox" checked={form.isBox} onChange={(e) => setForm({ ...form, isBox: e.target.checked })} />
-                Sold as a box — single price, no weight choice
-              </label>
-              <span className="field-hint">For brownies, cupcakes, jars… Customers pay the base price; no 0.5/1/2 KG picker.</span>
-            </div>
-          </div>
-          <button type="submit" hidden />
-        </form>
-      </Modal>
-
-      <Modal
-        open={!!deleting}
-        onClose={() => !removing && setDeleting(null)}
-        kicker="Confirm"
-        title={`Delete "${deleting?.name}"?`}
-        foot={
-          <>
-            <button className="btn btn-ghost" onClick={() => setDeleting(null)} disabled={removing}>Cancel</button>
-            <button className="btn btn-primary" style={{ background: 'var(--c-error)' }} onClick={confirmDelete} disabled={removing}>{removing ? 'Deleting…' : 'Delete'}</button>
-          </>
-        }
-      >
-        <p className="muted">A category can only be deleted once no cakes or occasions use it. To just hide it from the shop, untick &ldquo;Shown&rdquo; instead.</p>
-      </Modal>
+              },
+            },
+            { key: 'sold', header: 'Sold', sortable: true, align: 'right', sortValue: (p) => p.sold || 0, render: (p) => <span className="u-num">{p.sold || 0}</span> },
+          ]}
+        />
+      </Card>
     </div>
   );
 }

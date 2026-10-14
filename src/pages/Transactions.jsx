@@ -1,413 +1,214 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
-import Icon from '../components/common/Icon';
-import Modal from '../components/common/Modal';
-import EmptyState from '../components/common/EmptyState';
-import Pagination from '../components/common/Pagination';
+import { useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  Page, Card, Stat, Button, Status, Cell, DataTable, Drawer, KeyValue, Alert, AreaChart, BarList, SegmentBar, Input,
+  Loader, useAsync, useConfirm, toast, downloadCsv,
+} from '../ui';
+import { FilterBar, TableEmpty, CopyValue } from '../ui/ext-sales';
+import { useTableFilters, iso, plural } from '../ui/ext-sales-utils';
 import { transactionService } from '../services/transactionService';
-import { useUiStore } from '../store/uiStore';
-import { money, fmtDate, fmtTime, fmtDateTime } from '../utils/format';
+import { money, fmtDateTime, fmtDateShort } from '../utils/format';
 
-const STATUSES = ['All', 'Paid', 'Refunded', 'Failed'];
-const METHODS = ['All', 'UPI', 'Card', 'Net Banking'];
+const METHOD_TONE = { UPI: 'brand', Card: 'blue', 'Net Banking': 'violet' };
 
-const STATUS_TONE = { Paid: 'success', Refunded: 'warn', Failed: 'err' };
-const STATUS_ICON = { Paid: 'check', Refunded: 'refresh', Failed: 'alert' };
-const METHOD_ICON = { UPI: 'phone', Card: 'card', 'Net Banking': 'home' };
+const loadAll = () => Promise.all([transactionService.list(), transactionService.summary()]).then(([list, summary]) => ({ list, summary }));
 
-/** Link to the order's detail page when we know its id, else the orders list. */
-const orderHref = (t) => {
-  const id = t.order && typeof t.order === 'object' ? t.order._id : t.order;
-  return id ? `/orders/${id}` : '/orders';
-};
+const FILTERS = [
+  { key: 'status', label: 'Status', options: ['Paid', 'Refunded', 'Failed'], test: (t, v) => t.status === v },
+  { key: 'method', label: 'Method', options: ['UPI', 'Card', 'Net Banking'], test: (t, v) => t.method === v },
+];
+const searchText = (t) => [t.txnId, t.orderCode, t.customer, t.email, t.razorpayPaymentId, t.razorpayOrderId].join(' ');
 
 export default function Transactions() {
-  const pushToast = useUiStore((s) => s.pushToast);
-  const [summary, setSummary] = useState(null);
-  const [list, setList] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [refunding, setRefunding] = useState(null);
-  const [viewing, setViewing] = useState(null);
-  const [busy, setBusy] = useState(false);
-
-  const [params] = useSearchParams();
-  const [q, setQ] = useState(() => params.get('q') || '');
-  const [status, setStatus] = useState('All');
-  const [method, setMethod] = useState('All');
+  const navigate = useNavigate();
+  const confirm = useConfirm();
+  const [params, setParams] = useSearchParams();
+  const { data, setData, loading, error, reload } = useAsync(loadAll);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
-  const [page, setPage] = useState(1);
-  const PAGE_SIZE = 10;
+  const [refunding, setRefunding] = useState(false);
+  const openId = params.get('open');
 
-  useEffect(() => {
-    transactionService.summary().then(setSummary).catch(() => {});
-  }, []);
+  const list = useMemo(() => data?.list || [], [data]);
+  const inRange = useMemo(() => list.filter((t) => {
+    // compare calendar days in local time
+    const local = t.paidAt ? new Date(new Date(t.paidAt).getTime() - new Date(t.paidAt).getTimezoneOffset() * 60000).toISOString().slice(0, 10) : '';
+    return (!from || local >= from) && (!to || local <= to);
+  }), [list, from, to]);
+  const f = useTableFilters(inRange, { search: searchText, filters: FILTERS }, { q: params.get('q') || '' });
+  const dateActive = from || to;
 
-  const load = () => {
-    setLoading(true);
-    setPage(1);
-    transactionService
-      .list({ q, status, method, from, to })
-      .then(setList)
-      .catch((e) => pushToast({ title: 'Could not load transactions', subtitle: e.message, kind: 'err' }))
-      .finally(() => setLoading(false));
+  const open = list.find((t) => t._id === openId) || null;
+  const setOpen = (t) => {
+    const next = new URLSearchParams(params);
+    if (t) next.set('open', t._id); else next.delete('open');
+    setParams(next, { replace: true });
   };
 
-  useEffect(load, [status, method, from, to]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    const id = setTimeout(load, q ? 350 : 0);
-    return () => clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
-  const safePage = Math.min(page, Math.max(1, Math.ceil((list || []).length / PAGE_SIZE)));
-  const paged = useMemo(() => (list || []).slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE), [list, safePage]);
-
-  const clearFilters = () => {
-    setQ(''); setStatus('All'); setMethod('All'); setFrom(''); setTo('');
-  };
-  const filtersActive = q || status !== 'All' || method !== 'All' || from || to;
-
-  const shownTotal = useMemo(() => (list || []).reduce((sum, t) => sum + (t.status === 'Refunded' ? 0 : t.amount), 0), [list]);
-
-  const maxDaily = useMemo(() => Math.max(1, ...(summary?.daily || []).map((d) => d.revenue)), [summary]);
-  const maxMethod = useMemo(() => Math.max(1, ...(summary?.byMethod || []).map((m) => m.revenue)), [summary]);
-  const todayLabel = new Date().toLocaleDateString('en-GB', { weekday: 'short' });
-
-  const confirmRefund = async () => {
-    setBusy(true);
+  const refund = async (t) => {
+    const ok = await confirm({
+      title: `Mark ${t.txnId} as refunded?`,
+      message: `This only records the refund in BigBakeBatter and cancels order ${t.orderCode || ''}. It does not move any money — refund ${money(t.amount)} to ${t.customer} from the Razorpay dashboard first.`,
+      confirmLabel: 'Mark as refunded', danger: true,
+    });
+    if (!ok) return;
+    setRefunding(true);
     try {
-      await transactionService.refund(refunding._id);
-      pushToast({ title: `${refunding.txnId} marked as refunded`, subtitle: 'The order was cancelled. Remember to send the money back from your Razorpay dashboard.', kind: 'ok' });
-      setRefunding(null);
-      load();
-      transactionService.summary().then(setSummary).catch(() => {});
-    } catch (e) {
-      pushToast({ title: 'Refund failed', subtitle: e.message, kind: 'err' });
+      const updated = await transactionService.refund(t._id);
+      const summary = await transactionService.summary().catch(() => data.summary);
+      setData((d) => ({ list: d.list.map((x) => (x._id === t._id ? updated : x)), summary }));
+      toast.success(`${t.txnId} marked refunded`, `Order ${t.orderCode} was cancelled`);
+    } catch (err) {
+      toast.error('Could not record the refund', err.message);
     } finally {
-      setBusy(false);
+      setRefunding(false);
     }
   };
 
+  const exportCsv = () => downloadCsv(
+    'payments',
+    ['Transaction ID', 'Paid at', 'Status', 'Refunded at', 'Order', 'Customer', 'Email', 'Method', 'Amount', 'Currency', 'Razorpay order ID', 'Razorpay payment ID'],
+    f.rows.map((t) => [t.txnId, iso(t.paidAt), t.status, iso(t.refundedAt), t.orderCode, t.customer, t.email, t.method, t.amount, t.currency || 'INR', t.razorpayOrderId, t.razorpayPaymentId])
+  );
+
+  const s = data?.summary;
+  const filteredTotal = f.rows.filter((t) => t.status === 'Paid').reduce((a, t) => a + t.amount, 0);
+
   return (
-    <>
-      <div className="kpi-grid k5">
-        <div className="kpi">
-          <span className="kico" style={{ background: 'var(--c-accent-soft)', color: 'var(--c-accent)' }}>
-            <Icon name="card" className="icon icon-sm" />
-          </span>
-          <div className="kv">{summary ? money(summary.grossRevenue) : '—'}</div>
-          <div className="kl">Gross revenue</div>
-        </div>
-        <div className="kpi">
-          <span className="kico" style={{ background: 'var(--c-success-soft)', color: 'var(--c-success)' }}>
-            <Icon name="check" className="icon icon-sm" />
-          </span>
-          <div className="kv">{summary ? money(summary.netRevenue) : '—'}</div>
-          <div className="kl">Net revenue</div>
-        </div>
-        <div className="kpi">
-          <span className="kico" style={{ background: '#eef2ff', color: '#4338ca' }}>
-            <Icon name="clock" className="icon icon-sm" />
-          </span>
-          <div className="kv">{summary ? money(summary.todayRevenue) : '—'}</div>
-          <div className="kl">Today &middot; {summary?.todayCount || 0} payment{summary?.todayCount === 1 ? '' : 's'}</div>
-        </div>
-        <div className="kpi">
-          <span className="kico" style={{ background: '#f0fdfa', color: '#0f766e' }}>
-            <Icon name="gift" className="icon icon-sm" />
-          </span>
-          <div className="kv">{summary ? money(summary.aov) : '—'}</div>
-          <div className="kl">Average order value</div>
-        </div>
-        <div className="kpi">
-          <span className="kico" style={{ background: 'var(--c-warning-soft)', color: 'var(--c-warning)' }}>
-            <Icon name="refresh" className="icon icon-sm" />
-          </span>
-          <div className="kv">{summary ? money(summary.refundedAmount) : '—'}</div>
-          <div className="kl">Refunded &middot; {summary?.refundedCount || 0}</div>
-        </div>
-      </div>
+    <Page
+      title="Payments"
+      description="Every Razorpay payment recorded against an order, with refunds and daily revenue."
+      actions={<Button icon="refresh" onClick={reload} loading={loading && !!data}>Refresh</Button>}
+    >
+      <Loader loading={loading && !data} error={!data ? error : ''} onRetry={reload} rows={6}>
+        {s && (
+          <div className="u-stack">
+            <div className="u-grid cols-4">
+              <Stat label="Gross revenue" icon="rupee" tone="brand" value={money(s.grossRevenue)} note={`${money(s.last30dRevenue)} in the last 30 days`} trend={(s.daily || []).map((d) => d.revenue)} />
+              <Stat label="Refunded" icon="refresh" tone="amber" value={money(s.refundedAmount)} note={plural(s.refundedCount, 'refund')} onClick={() => f.setValue('status', 'Refunded')} />
+              <Stat label="Net revenue" icon="trend" tone="green" value={money(s.netRevenue)} note={`Avg ${money(s.aov)} per payment`} />
+              <Stat label="Transactions" icon="barchart" tone="violet" value={s.totalTransactions} note={`${s.paidCount} paid · ${s.refundedCount} refunded · ${s.failedCount} failed`} />
+            </div>
 
-      <div className="a-grid-2">
-        <div className="a-panel">
-          <div className="a-panel-head">
-            <h3>Revenue, last 7 days</h3>
-            {summary && <span className="a-count">{money(summary.last7dRevenue)} total</span>}
-          </div>
-          {summary ? (
-            <div className="fin-chart">
-              {summary.daily.map((d) => (
-                <div className={`fbar ${d.revenue === 0 ? 'zero' : ''} ${d.label === todayLabel ? 'on' : ''}`} key={d.date}>
-                  <span className="fval">{d.revenue > 0 ? money(d.revenue) : ''}</span>
-                  <span className="ftrack">
-                    <span className="ffill" style={{ height: `${Math.max(4, (d.revenue / maxDaily) * 100)}%` }} />
-                  </span>
-                  <span className="flab">
-                    <b>{d.label}</b>
-                    <span>{d.count}</span>
-                  </span>
+            <div className="u-grid main-side">
+              <Card title="Daily revenue" subtitle={`${money(s.last7dRevenue)} over the last 7 days · ${money(s.todayRevenue)} today from ${plural(s.todayCount, 'payment')}`}>
+                <AreaChart
+                  height={240}
+                  format={money}
+                  data={(s.daily || []).map((d) => ({ label: `${d.label} ${fmtDateShort(new Date(d.date))}`, value: d.revenue, sub: plural(d.count, 'payment') }))}
+                />
+              </Card>
+              <Card title="By method" subtitle="Paid transactions, all time">
+                <div className="u-stack">
+                  <BarList items={(s.byMethod || []).map((m) => ({ label: m.method, value: m.revenue, display: money(m.revenue), tone: METHOD_TONE[m.method] }))} />
+                  <SegmentBar items={(s.byMethod || []).map((m) => ({ label: m.method, value: m.count, tone: METHOD_TONE[m.method] }))} />
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div className="a-empty small"><p className="muted">Loading…</p></div>
-          )}
-        </div>
-
-        <div className="a-panel">
-          <div className="a-panel-head">
-            <h3>By payment method</h3>
-          </div>
-          {summary ? (
-            <div className="meth-list">
-              {summary.byMethod.map((m, i) => (
-                <div className={`meth-row ${i === 0 ? 'top' : ''}`} key={m.method}>
-                  <span className="mh">
-                    <b><Icon name={METHOD_ICON[m.method]} className="icon icon-sm" style={{ marginRight: 6, verticalAlign: -2 }} />{m.method}</b>
-                    <span>{money(m.revenue)} &middot; {m.count}</span>
-                  </span>
-                  <span className="meth-bar">
-                    <i style={{ width: `${(m.revenue / maxMethod) * 100}%` }} />
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="a-empty small"><p className="muted">Loading…</p></div>
-          )}
-          {summary && (
-            <div className="fin-note">
-              <span>Total transactions <b>{summary.totalTransactions}</b></span>
-              <span>Paid <b>{summary.paidCount}</b></span>
-              <span>Failed <b>{summary.failedCount}</b></span>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="a-panel">
-        <div className="a-panel-head">
-          <div className="stack gap-1">
-            <h3>All transactions</h3>
-            <span className="tiny muted">&ldquo;Refund&rdquo; here only updates your records — the money itself is returned from the Razorpay dashboard.</span>
-          </div>
-          <span className="a-count">{list ? `${list.length} shown` : ''}</span>
-        </div>
-
-        <div className="a-filters">
-          <div className="field f-grow">
-            <label>Search</label>
-            <input className="input" placeholder="Txn id, order, customer, email…" value={q} onChange={(e) => setQ(e.target.value)} />
-          </div>
-          <div className="field f-sm">
-            <label>Status</label>
-            <select className="select" value={status} onChange={(e) => setStatus(e.target.value)}>
-              {STATUSES.map((s) => <option key={s}>{s}</option>)}
-            </select>
-          </div>
-          <div className="field f-sm">
-            <label>Method</label>
-            <select className="select" value={method} onChange={(e) => setMethod(e.target.value)}>
-              {METHODS.map((m) => <option key={m}>{m}</option>)}
-            </select>
-          </div>
-          <div className="field f-date">
-            <label>From</label>
-            <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-          </div>
-          <div className="field f-date">
-            <label>To</label>
-            <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-          </div>
-          {filtersActive && (
-            <div className="f-actions">
-              <button className="btn btn-ghost btn-sm" onClick={clearFilters}>
-                <Icon name="x" className="icon icon-sm" />
-                Clear
-              </button>
-            </div>
-          )}
-        </div>
-
-        {loading ? (
-          <div className="a-empty"><p className="muted">Loading transactions…</p></div>
-        ) : !list || list.length === 0 ? (
-          <EmptyState
-            icon="card"
-            title="No transactions match these filters"
-            message="Try widening your date range or clearing filters."
-            action={filtersActive ? <button className="btn btn-outline btn-sm" onClick={clearFilters}>Clear filters</button> : null}
-          />
-        ) : (
-          <>
-            <div className="a-table-wrap">
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th>Txn</th>
-                    <th>Order</th>
-                    <th>Customer</th>
-                    <th className="tight">Method</th>
-                    <th>Date &amp; time</th>
-                    <th className="num">Amount</th>
-                    <th className="tight">Status</th>
-                    <th className="act" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {paged.map((t) => (
-                    <tr key={t._id} onClick={() => setViewing(t)} style={{ cursor: 'pointer' }}>
-                      <td><span className="cell-main" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.8em' }}>{t.txnId}</span></td>
-                      <td>
-                        {t.orderCode ? (
-                          <Link className="a-linkbtn" to={orderHref(t)} onClick={(e) => e.stopPropagation()}>{t.orderCode}</Link>
-                        ) : <span className="cell-sub">—</span>}
-                      </td>
-                      <td>
-                        <span className="cell-main">{t.customer}</span>
-                        <span className="cell-sub">{t.email}</span>
-                      </td>
-                      <td className="tight">
-                        <span className="row gap-2 center small">
-                          <Icon name={METHOD_ICON[t.method]} className="icon icon-sm" style={{ color: 'var(--c-muted)' }} />
-                          {t.method}
-                        </span>
-                      </td>
-                      <td>
-                        <span className="cell-main">{fmtDate(t.paidAt)}</span>
-                        <span className="cell-sub">{fmtTime(t.paidAt)}</span>
-                      </td>
-                      <td className="num cell-main">{money(t.amount)}</td>
-                      <td className="tight">
-                        <span className={`badge ${STATUS_TONE[t.status]}`}>
-                          <Icon name={STATUS_ICON[t.status]} className="icon icon-sm" />
-                          {t.status}
-                        </span>
-                      </td>
-                      <td className="act rowact" onClick={(e) => e.stopPropagation()}>
-                        <button className="iconbtn" title="View transaction details" aria-label="View details" onClick={() => setViewing(t)}>
-                          <Icon name="eye" className="icon icon-sm" />
-                        </button>
-                        {t.status === 'Paid' && (
-                          <button className="iconbtn" title="Mark as refunded" aria-label="Mark as refunded" onClick={() => setRefunding(t)}>
-                            <Icon name="refresh" className="icon icon-sm" />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="a-resultbar">
-              <span>Showing <b>{list.length}</b> transaction{list.length === 1 ? '' : 's'}</span>
-              <span className="rtotal">Total shown: <b>{money(shownTotal)}</b></span>
-            </div>
-            <Pagination page={safePage} pageSize={PAGE_SIZE} total={list.length} onPage={setPage} />
-          </>
-        )}
-      </div>
-
-      <Modal
-        open={!!refunding}
-        onClose={() => setRefunding(null)}
-        kicker="Confirm refund"
-        title={refunding ? `Refund ${refunding.txnId}?` : ''}
-        foot={
-          <>
-            <button className="btn btn-ghost" onClick={() => setRefunding(null)}>Cancel</button>
-            <button className="btn btn-primary" style={{ background: 'var(--c-error)' }} disabled={busy} onClick={confirmRefund}>
-              {busy ? 'Saving…' : 'Mark refunded & cancel order'}
-            </button>
-          </>
-        }
-      >
-        {refunding && (
-          <div className="stack gap-3">
-            <p className="lede">
-              This records the {money(refunding.amount)} payment for order <b>{refunding.orderCode}</b> ({refunding.customer}) as refunded
-              and cancels the order. This cannot be undone from here.
-            </p>
-            <p className="a-note">
-              <Icon name="alert" className="icon icon-sm" />
-              <span><b>No money is sent from here.</b> Issue the actual refund in your Razorpay dashboard (Payments → find payment
-              {refunding.razorpayPaymentId ? <> <span className="dv-mono">{refunding.razorpayPaymentId}</span></> : ''} → Refund).</span>
-            </p>
-          </div>
-        )}
-      </Modal>
-
-      <Modal
-        open={!!viewing}
-        onClose={() => setViewing(null)}
-        kicker="Payment receipt"
-        title={viewing?.txnId}
-        width={560}
-        foot={
-          viewing?.status === 'Paid' && (
-            <button
-              className="btn btn-primary"
-              style={{ background: 'var(--c-error)' }}
-              onClick={() => { setRefunding(viewing); setViewing(null); }}
-            >
-              <Icon name="refresh" className="icon icon-sm" />
-              Mark as refunded
-            </button>
-          )
-        }
-      >
-        {viewing && (
-          <div className="stack gap-5">
-            <div className="dv-top">
-              <span className="row gap-3 center">
-                <span className="dv-top-ico">
-                  <Icon name={STATUS_ICON[viewing.status]} className="icon icon-md" />
-                </span>
-                <span className="stack gap-1">
-                  <b style={{ fontSize: '1.05rem' }} className="dv-mono">{viewing.txnId}</b>
-                  <span className="tiny muted">{fmtDateTime(viewing.paidAt)}</span>
-                </span>
-              </span>
-              <span className="stack gap-1" style={{ alignItems: 'flex-end' }}>
-                <span className="dv-top-amt">{money(viewing.amount)}</span>
-                <span className={`badge ${STATUS_TONE[viewing.status]}`}>{viewing.status}</span>
-              </span>
+              </Card>
             </div>
 
-            <div>
-              <p className="dv-sec-title">Order &amp; customer</p>
-              <div className="dv-grid">
-                <div className="dv-field">
-                  <label>Order</label>
-                  <div className="v">
-                    {viewing.orderCode ? <Link className="a-linkbtn" to={orderHref(viewing)} onClick={() => setViewing(null)}>{viewing.orderCode}</Link> : '—'}
+            <Card flush>
+              <FilterBar
+                f={f}
+                filters={FILTERS}
+                placeholder="Search transaction, order, customer, Razorpay ID…"
+                extra={
+                  <div className="sales-date-range">
+                    <Input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} aria-label="Paid from" />
+                    <span>to</span>
+                    <Input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} aria-label="Paid to" />
+                    {dateActive && <Button size="sm" variant="ghost" onClick={() => { setFrom(''); setTo(''); }}>Any date</Button>}
                   </div>
-                </div>
-                <div className="dv-field"><label>Method</label><div className="v">{viewing.method}</div></div>
-                <div className="dv-field"><label>Customer</label><div className="v">{viewing.customer}</div></div>
-                <div className="dv-field"><label>Email</label><div className="v">{viewing.email || '—'}</div></div>
-              </div>
-            </div>
-
-            <div>
-              <p className="dv-sec-title">Razorpay reference</p>
-              <div className="dv-grid">
-                <div className="dv-field full"><label>Razorpay order ID</label><div className="v dv-mono">{viewing.razorpayOrderId || '—'}</div></div>
-                <div className="dv-field full"><label>Razorpay payment ID</label><div className="v dv-mono">{viewing.razorpayPaymentId || '—'}</div></div>
-              </div>
-            </div>
-
-            {viewing.status === 'Refunded' && (
-              <div>
-                <p className="dv-sec-title">Refund</p>
-                <div className="dv-grid">
-                  <div className="dv-field full"><label>Refunded on</label><div className="v">{viewing.refundedAt ? fmtDateTime(viewing.refundedAt) : '—'}</div></div>
-                </div>
-              </div>
-            )}
+                }
+                actions={<span className="u-small u-muted hide-xs">{money(filteredTotal)} paid in view</span>}
+                onExport={exportCsv}
+                exportDisabled={!f.rows.length}
+              />
+              <DataTable
+                rows={f.rows}
+                onRowClick={setOpen}
+                pageSize={15}
+                initialSort={{ key: 'paidAt', dir: 'desc' }}
+                highlight={(t) => t.status === 'Refunded'}
+                rowActions={(t) => [
+                  { label: 'View details', icon: 'eye', onClick: () => setOpen(t) },
+                  t.order && { label: `Open order ${t.orderCode}`, icon: 'bag', onClick: () => navigate(`/orders/${t.order}`) },
+                  t.status === 'Paid' && { divider: true },
+                  t.status === 'Paid' && { label: 'Mark as refunded…', icon: 'refresh', danger: true, onClick: () => refund(t) },
+                ]}
+                empty={
+                  <TableEmpty total={dateActive ? inRange.length : list.length} f={{ clear: () => { f.clear(); setFrom(''); setTo(''); } }} icon="rupee" title={dateActive ? 'No payments in this date range' : 'No payments yet'}>
+                    Payments are recorded automatically when a customer pays for an order with Razorpay.
+                  </TableEmpty>
+                }
+                columns={[
+                  { key: 'paidAt', header: 'Transaction', sortable: true, sortValue: (t) => new Date(t.paidAt).getTime(), render: (t) => <Cell title={t.txnId} sub={fmtDateTime(t.paidAt)} /> },
+                  { key: 'customer', header: 'Customer', render: (t) => <Cell avatar={t.customer} title={t.customer} sub={t.email} /> },
+                  { key: 'orderCode', header: 'Order', render: (t) => (t.order ? <button className="u-link" onClick={(e) => { e.stopPropagation(); navigate(`/orders/${t.order}`); }}>{t.orderCode}</button> : t.orderCode || '—') },
+                  { key: 'method', header: 'Method', render: (t) => <Cell title={t.method} sub={t.razorpayPaymentId ? <span className="u-mono">{t.razorpayPaymentId}</span> : undefined} /> },
+                  { key: 'amount', header: 'Amount', align: 'right', sortable: true, sortValue: (t) => t.amount, render: (t) => <b className="u-strong u-num" style={t.status !== 'Paid' ? { textDecoration: 'line-through', color: 'var(--u-muted)' } : undefined}>{money(t.amount)}</b> },
+                  { key: 'status', header: 'Status', shrink: true, render: (t) => <Status>{t.status}</Status> },
+                ]}
+              />
+            </Card>
           </div>
         )}
-      </Modal>
-    </>
+      </Loader>
+
+      <Drawer
+        open={!!open}
+        onClose={() => setOpen(null)}
+        title={open ? `Payment ${open.txnId}` : ''}
+        description={open ? `${money(open.amount)} · ${open.method} · ${fmtDateTime(open.paidAt)}` : ''}
+        footer={open && (
+          <>
+            {open.order && <Button icon="bag" onClick={() => navigate(`/orders/${open.order}`)}>View order</Button>}
+            <span className="u-spacer" />
+            {open.status === 'Paid'
+              ? <Button variant="danger-soft" icon="refresh" loading={refunding} onClick={() => refund(open)}>Mark as refunded</Button>
+              : <Button onClick={() => setOpen(null)}>Close</Button>}
+          </>
+        )}
+      >
+        {open && (
+          <div className="u-stack">
+            <div className="u-row between">
+              <Cell avatar={open.customer} title={open.customer} sub={open.email || 'No email'} />
+              <Status>{open.status}</Status>
+            </div>
+            {open.status === 'Paid' && (
+              <Alert tone="blue" icon="info" title="Refunds happen in Razorpay">
+                “Mark as refunded” only records the refund here and cancels the order. Refund the money from the Razorpay dashboard using the payment ID below.
+              </Alert>
+            )}
+            {open.status === 'Refunded' && <Alert tone="amber" icon="info" title="Refunded">Recorded as refunded on {fmtDateTime(open.refundedAt)}. The linked order was cancelled.</Alert>}
+            {open.status === 'Failed' && <Alert tone="red" icon="alert" title="Payment failed">No money was captured for this attempt.</Alert>}
+            <Card title="Payment">
+              <KeyValue
+                items={[
+                  ['Amount', <b key="a" className="u-num">{money(open.amount)} {open.currency && open.currency !== 'INR' ? open.currency : ''}</b>],
+                  ['Method', open.method],
+                  ['Status', <Status key="s">{open.status}</Status>],
+                  ['Paid at', fmtDateTime(open.paidAt)],
+                  open.refundedAt && ['Refunded at', fmtDateTime(open.refundedAt)],
+                  ['Transaction ID', <CopyValue key="t" value={open.txnId} label="Transaction ID copied" />],
+                  ['Order', open.order ? <button key="o" className="u-link" onClick={() => navigate(`/orders/${open.order}`)}>{open.orderCode}</button> : open.orderCode || '—'],
+                ]}
+              />
+            </Card>
+            <Card title="Razorpay">
+              <KeyValue
+                items={[
+                  ['Order ID', <CopyValue key="o" value={open.razorpayOrderId} label="Razorpay order ID copied" />],
+                  ['Payment ID', <CopyValue key="p" value={open.razorpayPaymentId} label="Razorpay payment ID copied" />],
+                  ['Recorded', fmtDateTime(open.createdAt)],
+                  ['Last updated', fmtDateTime(open.updatedAt)],
+                ]}
+              />
+            </Card>
+            {open.user && <Button iconRight="aright" onClick={() => navigate(`/customers/${open.user}`)}>View customer profile</Button>}
+          </div>
+        )}
+      </Drawer>
+    </Page>
   );
 }
